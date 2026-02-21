@@ -1,18 +1,26 @@
-# models / weights
-models/
-*.h5
-
-# environments anywhere
-.venv/
-venv/
-env/
-**/bpenv/
-third_party/bpenv/
-
-# caches / IDE / OS
+﻿venv/
+.env
 __pycache__/
 *.pyc
-.vscode/
-.idea/
-desktop.ini
-Thumbs.db
+
+# data + outputs (do not commit large data)
+data/raw/
+data/processed/
+data/matlab_data/
+outputs/
+
+# repo artifacts from other repos
+results_output/
+checkpoints_output/
+tfrecord_output/
+
+# matlab autosaves
+*.asv
+# outputs/results
+Extraction Methods/
+*.fig
+models/
+third_party/bpenv/
+**/bpenv/
+.venv/
+venv/
