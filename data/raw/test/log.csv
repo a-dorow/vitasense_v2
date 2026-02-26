@@ -1,7 +1,0 @@
-timestamp,experiment,subject_id,age,race,gender,camera,resolution,target_fps,actual_fps,duration_s,file_path,compression,quality,notes
-2026-02-20 20:43:32,test,sub-1,0,Prefer not to say,Prefer not to say,Integrated Webcam,1920x1080,30,26.5019500149044,20,C:\Users\avask\OneDrive\Desktop\bpSp02-estimation-ippg\data\raw\test\sub-1\sub-1.mp4,MPEG-4,NaN,
-2026-02-20 20:51:43,test,sub-2,0,Prefer not to say,Prefer not to say,Integrated Webcam,1920x1080,30,23.7912253060648,20,C:\Users\avask\OneDrive\Desktop\bpSp02-estimation-ippg\data\raw\test\sub-2\sub-2.mp4,MPEG-4,NaN,
-2026-02-20 20:55:57,test,subject_1,0,Prefer not to say,Prefer not to say,Integrated Webcam,1920x1080,30,27.5785832710596,20,C:\Users\avask\OneDrive\Desktop\bpSp02-estimation-ippg\data\raw\test\subject_1\subject_1.mp4,MPEG-4,NaN,
-2026-02-24 13:55:01,test,subject_2,0,Prefer not to say,Prefer not to say,Integrated Webcam,1920x1080,30,28.891318338447,20,C:\Users\avask\OneDrive\Desktop\bpSp02-estimation-ippg\data\raw\test\subject_2\subject_2.mp4,MPEG-4,NaN,
-2026-02-26 01:07:55,test,subject_3,0,Prefer not to say,Prefer not to say,Integrated Webcam,1920x1080,30,29.0909975275416,20,C:\Users\avask\OneDrive\Desktop\bpSp02-estimation-ippg\data\raw\test\subject_3\subject_3.mp4,MPEG-4,NaN,
-2026-02-26 01:09:12,test,subject_4,0,Prefer not to say,Prefer not to say,Integrated Webcam,1920x1080,30,29.5522586059834,20,C:\Users\avask\OneDrive\Desktop\bpSp02-estimation-ippg\data\raw\test\subject_4\subject_4.mp4,MPEG-4,NaN,
