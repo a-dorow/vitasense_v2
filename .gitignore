@@ -1,26 +1,26 @@
-﻿venv/
-.env
+﻿# Python envs
+third_party/bpenv/
+.venv/
 __pycache__/
 *.pyc
 
-# data + outputs (do not commit large data)
-data/raw/
-data/processed/
-data/matlab_data/
-outputs/
+# Data + recordings
+data/
+*.avi
+*.mp4
 
-# repo artifacts from other repos
-results_output/
-checkpoints_output/
-tfrecord_output/
-
-# matlab autosaves
-*.asv
-# outputs/results
-Extraction Methods/
+# MATLAB outputs
 *.fig
-models/
-third_party/bpenv/
-**/bpenv/
-.venv/
-venv/
+*.mat
+*.asv
+*.m~
+
+# Generated outputs
+*_vitals.json
+bp_input.mat
+bp_summary.json
+
+# OS
+.DS_Store
+Thumbs.db
+
