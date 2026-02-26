@@ -1,0 +1,8 @@
+numpy 
+scipy
+tensorflow
+kapre
+h5py
+fastapi
+uvicorn 
+pydantic

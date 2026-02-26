@@ -1,0 +1,3 @@
+Video: C:\Users\avask\OneDrive\Desktop\bpSp02-estimation-ippg\data\raw\test\subject_4\subject_4.mp4
+Fs: 30.000
+SpO2_mean: 99.092

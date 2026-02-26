@@ -1,0 +1,18 @@
+# models / weights
+models/
+*.h5
+
+# environments anywhere
+.venv/
+venv/
+env/
+**/bpenv/
+third_party/bpenv/
+
+# caches / IDE / OS
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+desktop.ini
+Thumbs.db
