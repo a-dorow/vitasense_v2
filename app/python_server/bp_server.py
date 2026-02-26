@@ -7,11 +7,12 @@ HTTP server wrapper around third_party BP prediction logic.
 
 import os
 import sys
+import subprocess
+import shlex
+import json
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import sys
-from pathlib import Path
 
 THIS_DIR = Path(__file__).resolve().parent              # ...\app\python_server
 REPO_ROOT = THIS_DIR.parents[1]                         # ...\bpSp02-estimation-ippg
@@ -56,6 +57,12 @@ class PredictRequest(BaseModel):
     stride_s: float = 1.0
     shuffle_test: bool = False
     shuffle_seed: int = 0
+
+
+class PipelineRequest(BaseModel):
+    video_path: str
+    json_path: str | None = None
+    do_popup: bool = False
 
 
 @app.get("/health")
@@ -107,6 +114,11 @@ def predict(req: PredictRequest):
     sbp, dbp = pred.predict_sbp_dbp(model, X_in)
 
     return {
+        "input_path": req.input_path,
+        "input_type": input_type,
+        "model_path": req.model_path,
+        "win_s": float(req.win_s),
+        "stride_s": float(req.stride_s),
         "fs_in": float(fs_in),
         "num_samples": int(len(y)),
         "duration_s": float(len(y) / fs_in),
@@ -138,4 +150,83 @@ def predict_summary(req: PredictRequest):
         "sbp_std": out.get("sbp_std"),
         "dbp_mean": out.get("dbp_mean"),
         "dbp_std": out.get("dbp_std"),
+    }
+
+
+def _escape_matlab_string(value: str) -> str:
+    return value.replace("'", "''")
+
+
+def _build_matlab_command(video_path: str, json_path: str, do_popup: bool) -> str:
+    esc_video = _escape_matlab_string(video_path)
+    esc_json = _escape_matlab_string(json_path)
+    popup = "true" if do_popup else "false"
+
+    return (
+        "try, "
+        f"[hr_bpm, spo2_pct] = run_pipeline_on_video('{esc_video}', "
+        f"'doPopup', {popup}, 'writeJson', true, 'jsonPath', '{esc_json}'); "
+        "disp(jsonencode(struct('ok', true, 'hr_bpm', hr_bpm, 'spo2_pct', spo2_pct))); "
+        "catch ME, "
+        "disp(jsonencode(struct('ok', false, 'error', ME.message))); exit(1); "
+        "end; exit(0);"
+    )
+
+
+@app.post("/run_pipeline")
+def run_pipeline(req: PipelineRequest):
+    if not os.path.isfile(req.video_path):
+        raise HTTPException(status_code=400, detail=f"video_path not found: {req.video_path}")
+
+    if req.json_path:
+        json_path = req.json_path
+    else:
+        vp, vn = os.path.split(req.video_path)
+        stem, _ = os.path.splitext(vn)
+        json_path = os.path.join(vp, f"{stem}_vitals.json")
+
+    matlab_expr = _build_matlab_command(req.video_path, json_path, req.do_popup)
+    matlab_cmd = os.getenv("MATLAB_CMD", "matlab")
+    command = f"{matlab_cmd} -batch {shlex.quote(matlab_expr)}"
+
+    try:
+        completed = subprocess.run(
+            command,
+            shell=True,
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "MATLAB pipeline execution failed",
+                "stdout": exc.stdout,
+                "stderr": exc.stderr,
+            },
+        ) from exc
+
+    if not os.path.isfile(json_path):
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "Pipeline completed but JSON was not written",
+                "stdout": completed.stdout,
+                "stderr": completed.stderr,
+                "json_path": json_path,
+            },
+        )
+
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            vitals = json.load(f)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read JSON output: {exc}") from exc
+
+    return {
+        "ok": True,
+        "json_path": json_path,
+        "vitals": vitals,
     }

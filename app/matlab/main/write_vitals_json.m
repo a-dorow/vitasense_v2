@@ -1,43 +1,46 @@
-function [hr_bpm, spo2_pct] = run_pipeline_on_video(video_path, varargin)
-% run_pipeline_on_video - wrapper to call your pipeline entry point
-% Optional args (name/value):
-%   'doPopup'   (logical)  default false
-%   'writeJson' (logical)  default false
-%   'jsonPath'  (char/string) default: <video_dir>\<video_name>_vitals.json
+function outPath = write_vitals_json(jsonPath, hr_bpm, spo2_pct, video_path)
+% write_vitals_json  Persist HR/SpO2 results to a JSON file.
+%
+% Inputs:
+%   jsonPath   - output file path (char/string)
+%   hr_bpm     - numeric scalar (heart rate)
+%   spo2_pct   - numeric scalar (SpO2)
+%   video_path - source video path (optional)
+%
+% Output:
+%   outPath    - written JSON path (char)
 
-setup_paths();
-
-p = inputParser;
-p.addParameter('doPopup', false, @(x)islogical(x) || isnumeric(x));
-p.addParameter('writeJson', false, @(x)islogical(x) || isnumeric(x));
-p.addParameter('jsonPath', "", @(x)ischar(x) || isstring(x));
-p.parse(varargin{:});
-
-doPopup   = logical(p.Results.doPopup);
-writeJson = logical(p.Results.writeJson);
-jsonPath  = string(p.Results.jsonPath);
-
-% Determine repo root from this file location:
-this_file  = mfilename('fullpath');
-main_dir   = fileparts(this_file);     % ...\app\matlab\main
-matlab_dir = fileparts(main_dir);      % ...\app\matlab
-app_dir    = fileparts(matlab_dir);    % ...\app
-repo_root  = fileparts(app_dir);       % ...\repo
-
-plot_path    = fullfile(repo_root, "outputs", "figs");
-trace_folder = fullfile(repo_root, "outputs", "logs");
-
-if ~isfolder(plot_path), mkdir(plot_path); end
-if ~isfolder(trace_folder), mkdir(trace_folder); end
-
-[hr_bpm, spo2_pct] = iPPG_pipeline_v4(video_path, plot_path, trace_folder, repo_root, doPopup);
-
-if writeJson
-    if strlength(jsonPath) == 0
-        [vp, vn] = fileparts(video_path);
-        jsonPath = fullfile(vp, string(vn) + "_vitals.json");
-    end
-    write_vitals_json(jsonPath, hr_bpm, spo2_pct, video_path);
+if nargin < 4
+    video_path = "";
 end
 
+if nargin < 1 || strlength(string(jsonPath)) == 0
+    error('write_vitals_json:InvalidPath', 'jsonPath is required.');
+end
+
+outPath = char(string(jsonPath));
+outDir = fileparts(outPath);
+if ~isempty(outDir) && ~isfolder(outDir)
+    mkdir(outDir);
+end
+
+payload = struct();
+payload.timestamp_utc = char(datetime('now', 'TimeZone', 'UTC', 'Format', "yyyy-MM-dd'T'HH:mm:ss'Z'"));
+payload.video_path = char(string(video_path));
+payload.hr_bpm = double(hr_bpm);
+payload.spo2_pct = double(spo2_pct);
+
+% Add rounded display-friendly values while preserving raw values above.
+payload.hr_bpm_rounded = round(payload.hr_bpm, 2);
+payload.spo2_pct_rounded = round(payload.spo2_pct, 2);
+
+jsonTxt = jsonencode(payload, 'PrettyPrint', true);
+
+fid = fopen(outPath, 'w');
+if fid == -1
+    error('write_vitals_json:OpenFailed', 'Could not open %s for writing.', outPath);
+end
+
+cleanupObj = onCleanup(@() fclose(fid)); %#ok<NASGU>
+fwrite(fid, jsonTxt, 'char');
 end
