@@ -24,3 +24,10 @@ bp_summary.json
 .DS_Store
 Thumbs.db
 
+
+# Models (do not commit weights)
+models/*.h5
+models/*.hdf5
+models/*.ckpt
+models/*.pt
+models/*.onnx
