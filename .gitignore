@@ -54,3 +54,4 @@ FFT_RESULTS/
 __pycache__/
 *.pyc
 venv/
+desktop.ini
