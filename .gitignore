@@ -31,3 +31,26 @@ models/*.hdf5
 models/*.ckpt
 models/*.pt
 models/*.onnx
+
+# --- generated outputs (never commit) ---
+outputs/
+outputs/**
+
+# If you ever want to keep a folder but ignore contents, use:
+# outputs/**
+# !outputs/.gitkeep
+
+# Pipeline outputs
+outputs/
+FFT_RESULTS/
+
+# logs
+*.csv
+
+# matlab junk
+*.asv
+
+# python
+__pycache__/
+*.pyc
+venv/

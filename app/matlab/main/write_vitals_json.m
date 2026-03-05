@@ -1,43 +1,52 @@
-function [hr_bpm, spo2_pct] = run_pipeline_on_video(video_path, varargin)
-% run_pipeline_on_video - wrapper to call your pipeline entry point
-% Optional args (name/value):
-%   'doPopup'   (logical)  default false
-%   'writeJson' (logical)  default false
-%   'jsonPath'  (char/string) default: <video_dir>\<video_name>_vitals.json
+function write_vitals_json(jsonPath, hr_bpm, spo2_pct, video_path, bp_struct)
+% write_vitals_json - write vitals (and optional BP) to a JSON file.
+%
+% Usage:
+%   write_vitals_json(jsonPath, hr_bpm, spo2_pct, video_path)
+%   write_vitals_json(jsonPath, hr_bpm, spo2_pct, video_path, bp_struct)
+%
+% bp_struct (optional) can include fields like:
+%   bp_struct.sbp_mean, bp_struct.dbp_mean, bp_struct.sbp_std, bp_struct.dbp_std
 
-setup_paths();
-
-p = inputParser;
-p.addParameter('doPopup', false, @(x)islogical(x) || isnumeric(x));
-p.addParameter('writeJson', false, @(x)islogical(x) || isnumeric(x));
-p.addParameter('jsonPath', "", @(x)ischar(x) || isstring(x));
-p.parse(varargin{:});
-
-doPopup   = logical(p.Results.doPopup);
-writeJson = logical(p.Results.writeJson);
-jsonPath  = string(p.Results.jsonPath);
-
-% Determine repo root from this file location:
-this_file  = mfilename('fullpath');
-main_dir   = fileparts(this_file);     % ...\app\matlab\main
-matlab_dir = fileparts(main_dir);      % ...\app\matlab
-app_dir    = fileparts(matlab_dir);    % ...\app
-repo_root  = fileparts(app_dir);       % ...\repo
-
-plot_path    = fullfile(repo_root, "outputs", "figs");
-trace_folder = fullfile(repo_root, "outputs", "logs");
-
-if ~isfolder(plot_path), mkdir(plot_path); end
-if ~isfolder(trace_folder), mkdir(trace_folder); end
-
-[hr_bpm, spo2_pct] = iPPG_pipeline_v4(video_path, plot_path, trace_folder, repo_root, doPopup);
-
-if writeJson
-    if strlength(jsonPath) == 0
-        [vp, vn] = fileparts(video_path);
-        jsonPath = fullfile(vp, string(vn) + "_vitals.json");
+    if nargin < 4
+        error('write_vitals_json requires jsonPath, hr_bpm, spo2_pct, video_path.');
     end
-    write_vitals_json(jsonPath, hr_bpm, spo2_pct, video_path);
-end
+    if nargin < 5
+        bp_struct = struct();
+    end
 
+    % Normalize types
+    jsonPath  = char(string(jsonPath));
+    videoPath = char(string(video_path));
+
+    % Ensure output folder exists
+    outDir = fileparts(jsonPath);
+    if ~isempty(outDir) && ~exist(outDir, 'dir')
+        mkdir(outDir);
+    end
+
+    % Build payload
+    s = struct();
+    s.timestamp_iso = char(datetime('now','TimeZone','local','Format',"yyyy-MM-dd'T'HH:mm:ssXXX"));
+    s.video_path    = videoPath;
+    s.hr_bpm        = double(hr_bpm);
+    s.spo2_pct      = double(spo2_pct);
+
+    % Optional BP fields
+    if ~isempty(fieldnames(bp_struct))
+        if isfield(bp_struct,'sbp_mean'), s.sbp_mean = double(bp_struct.sbp_mean); end
+        if isfield(bp_struct,'dbp_mean'), s.dbp_mean = double(bp_struct.dbp_mean); end
+        if isfield(bp_struct,'sbp_std'),  s.sbp_std  = double(bp_struct.sbp_std);  end
+        if isfield(bp_struct,'dbp_std'),  s.dbp_std  = double(bp_struct.dbp_std);  end
+    end
+
+    % Encode and write
+    jsonText = jsonencode(s);
+
+    fid = fopen(jsonPath, 'w');
+    if fid < 0
+        error('Failed to open JSON for writing: %s', jsonPath);
+    end
+    fwrite(fid, jsonText, 'char');
+    fclose(fid);
 end
