@@ -16,6 +16,8 @@ DEFAULT_STRIDE_S = 1.0
 MODEL_EXTENSIONS = {".h5", ".keras"}
 INPUT_EXTENSIONS = {".mat", ".fig"}
 
+PATH_FOR_MODELS = 'C:\\Users\\avask\\OneDrive\\Desktop\\bpSp02-estimation-ippg\\models'
+
 
 class BPResearchGUI:
     def __init__(self, root: tk.Tk) -> None:
@@ -24,7 +26,7 @@ class BPResearchGUI:
         self.root.geometry("860x700")
 
         self.server_url_var = tk.StringVar(value=DEFAULT_SERVER_URL)
-        self.models_dir_var = tk.StringVar(value=str(Path.cwd() / "models"))
+        self.models_dir_var = tk.StringVar(value=PATH_FOR_MODELS)
         self.model_var = tk.StringVar()
         self.input_path_var = tk.StringVar()
         self.input_type_var = tk.StringVar(value="auto")

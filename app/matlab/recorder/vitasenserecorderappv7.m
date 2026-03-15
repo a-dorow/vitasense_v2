@@ -2,6 +2,12 @@ function vitasenserecorderappv7
 % Vitasense Recorder app: camera capture + metadata logging (AVI/MP4 toggle)
 % After recording finishes, runs run_pipeline_on_video on the recorded video.
 % This version also integrates end-only BP via local Python server (Quick Popup mode).
+%
+% Version 7 updates:
+% - Repeated recordings for the same subject now create new trial files
+% - Files are saved as subject_X_trial_Y.ext
+% - trial_id is logged to log.csv
+% - BP artifacts are saved per trial to avoid overwriting
 
 % Ensure repo paths are available
 try
@@ -30,6 +36,8 @@ state.stopflag = false;
 state.stopFlag = state.stopflag;
 state.lastSubjectNumber = [];
 state.lastSubjectID = "";
+state.lastTrialNumber = [];
+state.lastTrialID = "";
 state.lastExperiment = "";
 
 %% ------- UI --------
@@ -168,10 +176,9 @@ ui.bpModelLabel = uilabel(ui.ctrlpanel, ...
 
 ui.bpModelDropdown = uidropdown(ui.ctrlpanel, ...
     'Position',[505 55 85 24], ...
-    'Items', {'(none)'}, ...
+    'Items', {'(none)'} , ...
     'Value', '(none)');
 
-% Move redo checkbox to avoid overlap (y=0)
 ui.redoSameSubject = uicheckbox(ui.ctrlpanel,'Text','Repeat Previous Subject ID', ...
     'Position',[570 0 220 22],'Value',false);
 
@@ -412,14 +419,14 @@ refresh_bp_models();
             mkdir(expfolder);
         end
 
-        if ui.redoSameSubject.Value && ~isempty(state.lastSubjectNumber) && strcmp(state.lastExperiment,exp)
+        if ui.redoSameSubject.Value && ~isempty(state.lastSubjectNumber) && strcmp(state.lastExperiment, exp)
             subN = state.lastSubjectNumber;
         else
             subN = nextsubjectnumber(expfolder);
         end
         subid = sprintf('subject_%d', subN);
 
-        subfolder = fullfile(expfolder,subid);
+        subfolder = fullfile(expfolder, subid);
         if ~isfolder(subfolder)
             mkdir(subfolder)
         end
@@ -441,7 +448,19 @@ refresh_bp_models();
                 return;
         end
 
-        filepath = fullfile(subfolder, sprintf('%s%s', subid, ext));
+        trialN = nexttrialnumber(subfolder, subid);
+
+        while true
+            trialid = sprintf('trial_%d', trialN);
+            basename = sprintf('%s_%s', subid, trialid);
+            filepath = fullfile(subfolder, sprintf('%s%s', basename, ext));
+
+            if ~isfile(filepath)
+                break;
+            end
+
+            trialN = trialN + 1;
+        end
 
         % open camera
         try
@@ -497,7 +516,7 @@ refresh_bp_models();
             state.ticStart   = tic;
 
             setRunUIEnabled(false);
-            ui.status.Text = sprintf('Status: Recording %s for %ds at %.2f FPS... ', subid, dur, fps);
+            ui.status.Text = sprintf('Status: Recording %s %s for %ds at %.2f FPS... ', subid, trialid, dur, fps);
             logmsg("Recording started " + string(filepath));
 
             t0      = tic;
@@ -558,6 +577,7 @@ refresh_bp_models();
                     string(datetime("now","Format",'yyyy-MM-dd HH:mm:ss')), ...
                     string(exp), ...
                     string(subid), ...
+                    string(trialid), ...
                     doubleorNaN(ui.age.Value), ...
                     string(ui.race.Value), ...
                     string(ui.gender.Value), ...
@@ -571,7 +591,7 @@ refresh_bp_models();
                     NaN, ...
                     string(ui.notes.Value), ...
                     'VariableNames', ...
-                    {'timestamp','experiment','subject_id','age','race','gender', ...
+                    {'timestamp','experiment','subject_id','trial_id','age','race','gender', ...
                      'camera','resolution','target_fps','actual_fps','duration_s', ...
                      'file_path','compression','quality','notes'} );
 
@@ -585,6 +605,8 @@ refresh_bp_models();
 
             state.lastSubjectNumber = subN;
             state.lastSubjectID     = subid;
+            state.lastTrialNumber   = trialN;
+            state.lastTrialID       = trialid;
             state.lastExperiment    = exp;
 
             % call pipeline wrapper (mode + optional JSON export)
@@ -614,16 +636,16 @@ refresh_bp_models();
                 logmsg(sprintf("Pipeline results -> HR: %.2f bpm | SpO2: %.2f %%", hr_bpm, spo2_pct));
 
                 % BP: call from GUI if checkbox enabled (independent of processing mode)
-if logical(ui.runBP.Value)
-    try
-        logmsg("BP checkbox enabled -> running BP server call...");
-        run_bp_quick_popup(filepath, subfolder);
-    catch ME
-        logErr(ME);
-    end
-else
-    logmsg("BP checkbox disabled -> skipping BP.");
-end
+                if logical(ui.runBP.Value)
+                    try
+                        logmsg("BP checkbox enabled -> running BP server call...");
+                        run_bp_quick_popup(filepath, subfolder, basename);
+                    catch ME
+                        logErr(ME);
+                    end
+                else
+                    logmsg("BP checkbox disabled -> skipping BP.");
+                end
 
                 ui.status.Text = 'Status: Done. Pipeline finished.';
             catch ME
@@ -705,6 +727,33 @@ end
         end
     end
 
+    function n = nexttrialnumber(subfolder, subid)
+        pattern = fullfile(subfolder, sprintf('%s_trial_*.*', subid));
+        files = dir(pattern);
+
+        n = 1;
+        if isempty(files)
+            return;
+        end
+
+        nums = nan(numel(files), 1);
+
+        for k = 1:numel(files)
+            tok = regexp(files(k).name, ...
+                [regexptranslate('escape', subid) '_trial_(\d+)'], ...
+                'tokens', 'once');
+
+            if ~isempty(tok)
+                nums(k) = str2double(tok{1});
+            end
+        end
+
+        nums = nums(~isnan(nums));
+        if ~isempty(nums)
+            n = max(nums) + 1;
+        end
+    end
+
     function appendCSV(expfolder,row)
         logpath = fullfile(expfolder,'log.csv');
         if isfile(logpath)
@@ -750,7 +799,7 @@ end
     end
 
     function repo_root = get_repo_root()
-        % This file: ...\app\matlab\main\vitasenserecorderappv5_bp.m
+        % This file: ...\app\matlab\main\vitasenserecorderappv7.m
         this_file = mfilename('fullpath');
         this_dir  = fileparts(this_file); % ...\app\matlab\main
         repo_root = fileparts(fileparts(fileparts(this_dir))); % main->matlab->app->REPO
@@ -797,13 +846,13 @@ end
         end
     end
 
-    function run_bp_quick_popup(video_path, subfolder)
+    function run_bp_quick_popup(video_path, subfolder, basename)
         % End-only BP for Quick Popup mode:
         % - Extract mean RGB (Viola-Jones + KLT function)
         % - Drop first 6 seconds
-        % - Save bp_input.mat next to video
+        % - Save trial-specific MAT next to video
         % - Call Python server /predict_summary
-        % - Save bp_summary.json next to video
+        % - Save trial-specific JSON next to video
         % - Popup SBP/DBP with no decimals
 
         if ~logical(ui.runBP.Value)
@@ -883,13 +932,13 @@ end
         end
 
         % Save MAT input next to video (stable artifact for research)
-        bp_mat = fullfile(subfolder, "bp_input.mat");
+        bp_mat = fullfile(subfolder, basename + "_bp_input.mat");
         try
             save(bp_mat, 'y', 'fs_in');
             logmsg("Saved BP input MAT -> " + string(bp_mat));
         catch ME
             logErr(ME);
-            logmsg("BP: failed to save bp_input.mat");
+            logmsg("BP: failed to save BP input MAT");
             return;
         end
 
@@ -945,7 +994,7 @@ end
         dbp = round(double(resp.dbp_mean));
 
         % Save JSON next to video
-        out_json = fullfile(subfolder, "bp_summary.json");
+        out_json = fullfile(subfolder, basename + "_bp_summary.json");
         try
             fid = fopen(out_json, 'w');
             fwrite(fid, jsonencode(resp), 'char');
@@ -953,7 +1002,7 @@ end
             logmsg("Saved BP JSON -> " + string(out_json));
         catch ME
             logErr(ME);
-            logmsg("BP: failed to save bp_summary.json");
+            logmsg("BP: failed to save BP summary JSON");
         end
 
         % Popup SBP/DBP (no decimals)
