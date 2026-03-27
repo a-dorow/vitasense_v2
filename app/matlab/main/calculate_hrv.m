@@ -240,8 +240,8 @@ window_interval_counts = zeros(size(windowStarts));
 
 for w = 1:numel(windowStarts)
     idx = ppi_times_clean >= windowStarts(w) & ppi_times_clean < windowEnds(w);
-    ppi_win = ppi_ms_clean(idx);
 
+    ppi_win = ppi_ms_clean(idx);
     window_interval_counts(w) = numel(ppi_win);
 
     % Need at least 3 intervals to compute diff-based RMSSD sensibly
@@ -260,13 +260,6 @@ else
     RMSSD_windowed_mean_ms = NaN;
     RMSSD_windowed_std_ms  = NaN;
     numValidWindows = 0;
-end
-
-% Final HRV display metric should use windowed RMSSD if available
-if ~isnan(RMSSD_windowed_mean_ms)
-    HRV_display_ms = RMSSD_windowed_mean_ms;
-else
-    HRV_display_ms = RMSSD_ms;
 end
 
 %% --------------------- DISPLAY RESULTS ---------------------
