@@ -65,24 +65,44 @@ end
 fprintf('\nAll subjects processed.\n');
 
 
-%% Batch Running for subject_X_trial_Y (AVI + MP4)
+%% Batch Running for subject folders that contain trial files
 clear; clc;
 
 % ---------------- Fixed Paths ----------------
-base_plot_path   = 'D:\Microgravity Initial Data\Plots';
-base_trace_path  = 'D:\Microgravity Initial Data\Traces';
-main_path        = 'D:\Microgravity Initial Data';
+base_plot_path   = 'D:\Final Senior Desgn Data\Plots';
+base_trace_path  = 'D:\Final Senior Desgn Data\Traces';
+main_path        = 'D:\Final Senior Desgn Data\';
 
-video_root       = 'D:\Microgravity Initial Data\subject_1';
+video_root       = 'D:\Final Senior Desgn Data\finaldataset';
 
-% ---------------- Find video files ----------------
-aviFiles = dir(fullfile(video_root, 'subject_*_trial_*.avi'));
-mp4Files = dir(fullfile(video_root, 'subject_*_trial_*.mp4'));
+% ---------------- Find subject folders ----------------
+subjectDirs = dir(fullfile(video_root, 'subject_*'));
+subjectDirs = subjectDirs([subjectDirs.isdir]);
 
-allFiles = [aviFiles; mp4Files];
+if isempty(subjectDirs)
+    error('No subject folders found in: %s', video_root);
+end
+
+% ---------------- Collect all valid trial files ----------------
+allFiles = [];
+
+for s = 1:numel(subjectDirs)
+
+    subject_name = subjectDirs(s).name;
+    subject_path = fullfile(subjectDirs(s).folder, subject_name);
+
+    aviFiles = dir(fullfile(subject_path, 'subject_*_trial_*.avi'));
+    mp4Files = dir(fullfile(subject_path, 'subject_*_trial_*.mp4'));
+
+    subjectFiles = [aviFiles; mp4Files];
+
+    if ~isempty(subjectFiles)
+        allFiles = [allFiles; subjectFiles]; %#ok<AGROW>
+    end
+end
 
 if isempty(allFiles)
-    error('No video files found in: %s', video_root);
+    error('No video files found inside subject folders in: %s', video_root);
 end
 
 % ---------------- Deduplicate (prefer AVI over MP4) ----------------
@@ -96,6 +116,7 @@ for k = 1:numel(allFiles)
     tok = regexp(name, '^subject_(\d+)_trial_(\d+)\.(avi|mp4)$', 'tokens', 'once');
 
     if isempty(tok)
+        fprintf('Skipping unmatched file: %s\n', fullfile(folder, name));
         continue;
     end
 
@@ -151,8 +172,8 @@ for k = 1:numel(videoList)
     fprintf('\n=== Processing subject_%d trial_%d (%s) ===\n', subj, trial, ext);
 
     % ---- Make unique output folders for each trial ----
-    trial_tag   = sprintf('subject_%d_trial_%d', subj, trial);
-    plot_path   = fullfile(base_plot_path,  trial_tag);
+    trial_tag    = sprintf('subject_%d_trial_%d', subj, trial);
+    plot_path    = fullfile(base_plot_path, trial_tag);
     trace_folder = fullfile(base_trace_path, trial_tag);
 
     if ~exist(plot_path, 'dir')
