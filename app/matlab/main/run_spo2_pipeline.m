@@ -68,6 +68,9 @@ fprintf('\nAll subjects processed.\n');
 %% Batch Running for subject folders that contain trial files
 clear; clc;
 
+% Ensure all repo functions (including iPPG_pipeline_v4) are on the path
+setup_paths();
+
 % ---------------- Fixed Paths ----------------
 base_plot_path   = 'D:\Final Senior Desgn Data\Plots';
 base_trace_path  = 'D:\Final Senior Desgn Data\Traces';
@@ -195,4 +198,3 @@ end
 
 fprintf('\nDone.\n');
 %%
-

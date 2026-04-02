@@ -1,0 +1,72 @@
+import pandas as pd
+import numpy as np
+from scipy.stats import shapiro, friedmanchisquare, wilcoxon
+from itertools import combinations
+
+df = pd.read_excel(r'C:\Users\avask\OneDrive\Desktop\bpSp02-estimation-ippg\app\stats\Total HR MAE.xlsx', sheet_name="SpO2")
+
+# Compute per-subject absolute error
+df["Abs Error"] = (df["SpO2 GT"] - df["SpO2 iPPG"]).abs()
+
+# ── Summary ──────────────────────────────────────────────────────────────────
+print("SpO2 ABSOLUTE ERROR BY TRIAL")
+print("=" * 45)
+summary = df.groupby("Trial")["Abs Error"].agg(
+    Mean="mean", Std="std", Min="min", Max="max", N="count"
+).round(4)
+print(summary)
+
+# ── Shapiro-Wilk per trial ────────────────────────────────────────────────────
+print("\nSHAPIRO-WILK NORMALITY TEST")
+print("=" * 45)
+for trial in sorted(df["Trial"].unique()):
+    vals = df[df["Trial"] == trial]["Abs Error"].values
+    stat, p = shapiro(vals)
+    flag = "=> Normal" if p > 0.05 else "=> NOT normal"
+    print(f"  Trial {trial}: W={stat:.4f}, p={p:.4f}  {flag}")
+
+# ── Friedman test ─────────────────────────────────────────────────────────────
+print("\nFRIEDMAN TEST (comparing trials)")
+print("=" * 45)
+
+pivot = df.pivot(index="Subject", columns="Trial", values="Abs Error")
+groups = [pivot[t].values for t in sorted(pivot.columns)]
+
+stat_f, p_f = friedmanchisquare(*groups)
+print(f"Friedman χ² = {stat_f:.4f},  p = {p_f:.4f}")
+if p_f < 0.05:
+    print("→ Significant difference found between trials. Run post-hoc.\n")
+else:
+    print("→ No significant difference between trials.\n")
+
+# ── Post-hoc: Wilcoxon + Holm-Bonferroni ─────────────────────────────────────
+print("POST-HOC: WILCOXON + HOLM-BONFERRONI")
+print("=" * 45)
+
+trial_pairs = list(combinations(sorted(pivot.columns), 2))
+n_comparisons = len(trial_pairs)
+
+rows = []
+for t1, t2 in trial_pairs:
+    a = pivot[t1].values
+    b = pivot[t2].values
+    stat_w, p_w = wilcoxon(a, b, zero_method="wilcox")
+    rows.append((t1, t2, stat_w, p_w))
+
+rows.sort(key=lambda x: x[3])
+
+print(f"{'Pair':<15} {'W':>6} {'p (raw)':>10} {'p (Holm)':>10} {'Sig'}")
+print("-" * 50)
+for rank, (t1, t2, w, p_raw) in enumerate(rows):
+    p_holm = min(p_raw * (n_comparisons - rank), 1.0)
+    sig = "*" if p_holm < 0.05 else "ns"
+    print(f"Trial {t1} vs {t2}   {w:>6.1f}   {p_raw:>8.4f}   {p_holm:>8.4f}   {sig}")
+
+# ── Effect sizes ──────────────────────────────────────────────────────────────
+print("\nEFFECT SIZE (rank-biserial r)")
+print("=" * 45)
+n = len(pivot)
+for t1, t2, w, p_raw in rows:
+    r = 1 - (2 * w) / (n * (n + 1))
+    mag = 'large' if abs(r) >= 0.5 else 'medium' if abs(r) >= 0.3 else 'small'
+    print(f"  Trial {t1} vs {t2}: r = {r:.4f}  ({mag})")
