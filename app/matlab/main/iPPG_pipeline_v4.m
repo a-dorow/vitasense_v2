@@ -1,11 +1,16 @@
-%function [] = iPPG_pipeline_v4(video_path, plot_path, trace_folder, main_path)
-function [hr_bpm, spo2_pct] = iPPG_pipeline_v4(video_path, plot_path, trace_folder, main_path, doPopup)
+function [hr_bpm, spo2_pct, rawColorSignal_out, Fs_out] = iPPG_pipeline_v4(video_path, plot_path, trace_folder, main_path, doPopup)
 % iPPG_pipeline_v4 (VIDEO-ONLY)
 % Fully automated iPPG extraction + plotting + FFT post-processing.
-% - Cycles through ALL extraction methods (same as original v3)
-% - Computes SpO2 ONCE per video (sliding window, RED/GREEN)
-% - Uses extract_color_channels_from_video_KLT_rect for RGB extraction
-% - NO BrainVision / NO ground truth
+%
+% Modes:
+%   doPopup = false (Research) — cycles through ALL extraction methods,
+%       saves .fig files, runs full FFT post-processing.
+%   doPopup = true  (Quick Popup) — runs CHROM only, no file I/O,
+%       computes HR via inline Welch PSD, shows popup with results.
+%
+% Additional outputs (for BP reuse):
+%   rawColorSignal_out : [Nframes x 3] extracted RGB signal
+%   Fs_out             : video frame rate (Hz)
 
 setup_paths();
 
@@ -16,12 +21,17 @@ doPopup = logical(doPopup);
 
 hr_bpm  = NaN;
 spo2_pct = NaN;
-% Ensure output folder exists
-if ~exist(plot_path,'dir'); mkdir(plot_path); end
+rawColorSignal_out = [];
+Fs_out = NaN;
+
+% Ensure output folder exists (research mode needs it)
+if ~doPopup && ~exist(plot_path,'dir'); mkdir(plot_path); end
 
 %% Configure settings
 videoSettings = configure_video_settings();
-plotSettings  = configure_plot_settings();
+if ~doPopup
+    plotSettings = configure_plot_settings();
+end
 
 % Fallback sampling rate (overwritten per video if possible)
 VIDEO_SR = 30;
@@ -49,27 +59,36 @@ for i = 1:length(vid_direct)
     this_video   = vid_direct{i};
     subject_name = subjects_info{i};
 
-    subject_folder = create_sub_folder(plot_path, subject_name);
+    if ~doPopup
+        subject_folder = create_sub_folder(plot_path, subject_name);
+    end
 
-    % ---- True FPS per video (important for SpO2 + filters) ----
+    % ---- True FPS per video (reuse VideoReader for extraction) ----
     Fs = VIDEO_SR;
     try
         vr = VideoReader(this_video);
         Fs = vr.FrameRate;
-        clear vr;
     catch
-        % fallback
+        vr = [];
     end
+    Fs_out = Fs;
 
     ippgSettings = configure_ippg_settings(Fs);
 
-    % ---- Extract RGB (KLT rect) ----
-    rawColorSignal = extract_color_channels_from_video_KLT_v2(this_video, videoSettings);
+    % ---- Extract RGB (KLT rect) — pass VideoReader to avoid re-opening ----
+    if ~isempty(vr)
+        rawColorSignal = extract_color_channels_from_video_KLT_v2(vr, videoSettings);
+    else
+        rawColorSignal = extract_color_channels_from_video_KLT_v2(this_video, videoSettings);
+    end
 
     if isempty(rawColorSignal) || numel(rawColorSignal) < 10
         warning('[iPPG_pipeline_v4] No color signal extracted for %s. Face detection likely failed at this resolution — skipping subject.', subject_name);
         continue;
     end
+
+    % Store for BP reuse
+    rawColorSignal_out = rawColorSignal;
 
     % ---- Force RGB to 3xN ----
     rawColorSignal = local_interpolate_nonfinite(rawColorSignal);
@@ -141,77 +160,91 @@ for i = 1:length(vid_direct)
     spo2_pct = SpO2_mean;
     % =========================================================
 
-    extraction_methods = fieldnames(ippgSettings.EXTRACTION);
-
-    for j = 1:length(extraction_methods)
-
-        method_name = extraction_methods{j};
-
+    if doPopup
+        % ===== QUICK POPUP: CHROM only, no file I/O =====
         ippgSettingsLocal = ippgSettings;
-        ippgSettingsLocal.extractionMethod = ...
-            select_extraction_method(method_name, ippgSettingsLocal);
+        ippgSettingsLocal.extractionMethod = 'CHROM';
 
-        % ---- iPPG ----
         try
             iPPG = compute_ippg(rawRGB, ippgSettingsLocal);
         catch
-            iPPG = rawRGB(2,:); % GREEN fallback
+            iPPG = rawRGB(2,:);
         end
 
-        % ---- Plot ----
-        fig = figure('Visible','off');
+        % Compute HR directly via inline Welch PSD (no .fig round-trip)
+        hr_bpm = local_quick_hr(iPPG, Fs);
+
+    else
+        % ===== RESEARCH MODE: all extraction methods =====
+        extraction_methods = fieldnames(ippgSettings.EXTRACTION);
+
+        for j = 1:length(extraction_methods)
+
+            method_name = extraction_methods{j};
+
+            ippgSettingsLocal = ippgSettings;
+            ippgSettingsLocal.extractionMethod = ...
+                select_extraction_method(method_name, ippgSettingsLocal);
+
+            % ---- iPPG ----
+            try
+                iPPG = compute_ippg(rawRGB, ippgSettingsLocal);
+            catch
+                iPPG = rawRGB(2,:); % GREEN fallback
+            end
+
+            % ---- Plot ----
+            fig = figure('Visible','off');
+            try
+                t = (1:length(iPPG)) / Fs;
+                plot(t, iPPG, 'LineWidth', plotSettings.lineWidth);
+                set(gca, 'FontSize', plotSettings.fontSize, 'FontName', plotSettings.fontType);
+                xlabel('Time [s]');
+                ylabel('iPPG [a.u.]');
+                title(sprintf('%s | %s | SpO2 = %.2f%%', subject_name, method_name, SpO2_mean));
+                axis tight;
+
+                out_name = sprintf('%s_%s_iPPG.fig', subject_name, method_name);
+                saveas(fig, fullfile(subject_folder, out_name));
+            catch
+                % swallow plot/save errors per-method
+            end
+            close(fig);
+        end
+
+        % ---- Diagnostic: warn if no .fig files were saved ----
+        saved_figs = dir(fullfile(subject_folder, '*.fig'));
+        if isempty(saved_figs)
+            warning('[iPPG_pipeline_v4] No .fig files saved for subject "%s". Check extraction or plot errors above.', subject_name);
+        end
+
+        % Save SpO2 summary (once per video)
         try
-            t = (1:length(iPPG)) / Fs;
-            plot(t, iPPG, 'LineWidth', plotSettings.lineWidth);
-            set(gca, 'FontSize', plotSettings.fontSize, 'FontName', plotSettings.fontType);
-            xlabel('Time [s]');
-            ylabel('iPPG [a.u.]');
-            title(sprintf('%s | %s | SpO2 = %.2f%%', subject_name, method_name, SpO2_mean));
-            axis tight;
-
-            out_name = sprintf('%s_%s_iPPG.fig', subject_name, method_name);
-            saveas(fig, fullfile(subject_folder, out_name));
+            fid = fopen(fullfile(subject_folder, subject_name + "_SpO2.txt"), 'w');
+            fprintf(fid, 'Video: %s\nFs: %.3f\nSpO2_mean: %.3f\n', this_video, Fs, SpO2_mean);
+            fclose(fid);
         catch
-            % swallow plot/save errors per-method
+            % ignore
         end
-        close(fig);
-    end
-
-    % ---- Diagnostic: warn if no .fig files were saved for this subject ----
-    % This catches cases where every method's plot/save silently failed.
-    saved_figs = dir(fullfile(subject_folder, '*.fig'));
-    if isempty(saved_figs)
-        warning('[iPPG_pipeline_v4] No .fig files saved for subject "%s". Check extraction or plot errors above.', subject_name);
-    end
-
-    % Save SpO2 summary (once per video)
-    try
-        fid = fopen(fullfile(subject_folder, subject_name + "_SpO2.txt"), 'w');
-        fprintf(fid, 'Video: %s\nFs: %.3f\nSpO2_mean: %.3f\n', this_video, Fs, SpO2_mean);
-        fclose(fid);
-    catch
-        % ignore
     end
 end
 
-%% Post-processing FFT sorting (unchanged)
-%cycle_ippg_v2(plot_path, trace_folder, main_path);
+%% Post-processing (research mode only)
+if ~doPopup
+    fft_results = cycle_ippg_v2(plot_path, trace_folder, main_path);
 
-fft_results = cycle_ippg_v2(plot_path, trace_folder, main_path);
-
-% Pick HR for this video (single-video use case)
-try
-    if ~isempty(vid_direct) && numel(vid_direct) == 1 && ~isempty(fft_results)
-        hr_bpm = local_pick_hr_bpm(fft_results, subjects_info{1});
+    % Pick HR for this video (single-video use case)
+    try
+        if ~isempty(vid_direct) && numel(vid_direct) == 1 && ~isempty(fft_results)
+            hr_bpm = local_pick_hr_bpm(fft_results, subjects_info{1});
+        end
+    catch
+        hr_bpm = NaN;
     end
-catch
-    hr_bpm = NaN;
 end
 
 % Optional popup (quick mode)
-if doPopup && isfinite(hr_bpm) && isfinite(spo2_pct)
-    msgbox(sprintf('HR: %.1f bpm\nSpO2: %.1f%%', hr_bpm, spo2_pct), 'VitaSense Results');
-elseif doPopup
+if doPopup
     msgbox(sprintf('HR: %.1f bpm\nSpO2: %.1f%%', hr_bpm, spo2_pct), 'VitaSense Results');
 end
 
@@ -324,4 +357,75 @@ for k = 1:numel(ix)
 end
 
 hr_bpm = bestHR;
+end
+
+function hr_bpm = local_quick_hr(iPPG, fs)
+%LOCAL_QUICK_HR  Windowed Welch PSD heart rate (same logic as
+%   match_and_process_fft_v4 > local_windowed_hr_welch but without file I/O).
+    y = double(iPPG(:));
+    y = detrend(y, 'constant');
+    y(~isfinite(y)) = 0;
+
+    N = numel(y);
+    fMin = 0.7;   fMax = 3.0;
+    winSec = 10;  stepSec = 2;
+    peakRatioThresh = 4;
+
+    winN  = round(winSec * fs);
+    stepN = round(stepSec * fs);
+
+    if winN < 16 || N < 16
+        hr_bpm = NaN;
+        return;
+    end
+
+    nWin = max(1, floor((N - winN) / stepN) + 1);
+    hrs = NaN(nWin, 1);
+    wIdx = 0;
+
+    for s = 1:stepN:(N - winN + 1)
+        seg = y(s:s+winN-1);
+        win = hann(winN);
+        noverlap = round(0.5 * winN);
+        nfft = max(256, 2^nextpow2(winN));
+
+        [pxx, f] = pwelch(seg, win, noverlap, nfft, fs);
+
+        band = (f >= fMin) & (f <= fMax);
+        if ~any(band), continue; end
+
+        fb = f(band);
+        pb = pxx(band);
+
+        [peakMag, idx] = max(pb);
+        peakF = fb(idx);
+
+        medMag = median(pb);
+        if medMag <= 0, medMag = eps; end
+        peakRatio = peakMag / medMag;
+
+        if peakRatio < peakRatioThresh, continue; end
+
+        % Harmonic check
+        halfF = peakF / 2;
+        if halfF >= fMin
+            [~, hidx] = min(abs(fb - halfF));
+            if pb(hidx) >= 0.5 * peakMag
+                peakF = fb(hidx);
+            end
+        end
+
+        hr = peakF * 60;
+        if hr < fMin*60 || hr > fMax*60, continue; end
+
+        wIdx = wIdx + 1;
+        hrs(wIdx) = hr;
+    end
+
+    hrs = hrs(1:wIdx);
+    if isempty(hrs)
+        hr_bpm = NaN;
+    else
+        hr_bpm = median(hrs, 'omitnan');
+    end
 end

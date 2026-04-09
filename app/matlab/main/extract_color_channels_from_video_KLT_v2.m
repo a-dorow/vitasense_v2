@@ -204,16 +204,20 @@ function rawColorSignal = extract_color_channels_from_video_KLT_v2(video_input, 
         rgbMean = [mean(R(mask)), mean(G(mask)), mean(B(mask))] * 255;
     end
 
-    %% ---------- Initialize output ----------
+    %% ---------- Initialize output (preallocated) ----------
+    estTotalFrames = floor(videoReader.Duration * fps) + 10; % small buffer
+    rawColorSignal = NaN(estTotalFrames, 3);
+
     if PAD_SKIPPED_FRAMES
-        rawColorSignal = NaN(frameCount-1, 3); % frames before detection
+        writeIdx = frameCount - 1; % NaN padding for skipped frames
     else
-        rawColorSignal = zeros(0,3);
+        writeIdx = 0;
     end
 
     % First sample at the detection frame
     [rgb0, ~] = meanRGB_masked(videoFrame, bboxPoints);
-    rawColorSignal(end+1,:) = rgb0;
+    writeIdx = writeIdx + 1;
+    rawColorSignal(writeIdx,:) = rgb0;
 
     %% ---------- Process remaining frames ----------
     while hasFrame(videoReader)
@@ -260,8 +264,16 @@ function rawColorSignal = extract_color_channels_from_video_KLT_v2(video_input, 
         end
 
         [rgbMean, ~] = meanRGB_masked(videoFrame, bboxPoints);
-        rawColorSignal(end+1,:) = rgbMean; %#ok<AGROW>
+        writeIdx = writeIdx + 1;
+        if writeIdx > size(rawColorSignal, 1)
+            rawColorSignal(end+1,:) = rgbMean; %#ok<AGROW>
+        else
+            rawColorSignal(writeIdx,:) = rgbMean;
+        end
     end
+
+    % Trim to actual size
+    rawColorSignal = rawColorSignal(1:writeIdx,:);
 
     release(pointTracker);
 end

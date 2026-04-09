@@ -35,9 +35,12 @@ function [SpO2_mean, SpO2_win, t_win, R_vals] = ippg_spo2_fft(redSig, irSig, fs,
     fMin = 0.7;   % ~42 bpm
     fMax = 3.0;   % ~180 bpm
 
-    SpO2_win = [];
-    t_win    = [];
-    R_vals   = [];
+    % Preallocate output arrays
+    nWindows = max(1, floor((N - winLen) / step) + 1);
+    SpO2_win = NaN(1, nWindows);
+    t_win    = NaN(1, nWindows);
+    R_vals   = NaN(1, nWindows);
+    wIdx     = 0;
 
     idx = 1;
     while (idx + winLen - 1) <= N
@@ -48,9 +51,10 @@ function [SpO2_mean, SpO2_win, t_win, R_vals] = ippg_spo2_fft(redSig, irSig, fs,
         % Skip segments that are all zeros / constant / NaN
         if any(~isfinite(segR_raw)) || any(~isfinite(segIR_raw)) || ...
            std(segR_raw) == 0 || std(segIR_raw) == 0
-            SpO2_win(end+1) = NaN; %#ok<AGROW>
-            t_win(end+1)    = (idx + winLen/2 - 1) / fs; %#ok<AGROW>
-            R_vals(end+1)   = NaN; %#ok<AGROW>
+            wIdx = wIdx + 1;
+            SpO2_win(wIdx) = NaN;
+            t_win(wIdx)    = (idx + winLen/2 - 1) / fs;
+            R_vals(wIdx)   = NaN;
             idx = idx + step;
             continue;
         end
@@ -74,9 +78,10 @@ function [SpO2_mean, SpO2_win, t_win, R_vals] = ippg_spo2_fft(redSig, irSig, fs,
         bandIdx = (f >= fMin) & (f <= fMax);
 
         if ~any(bandIdx)
-            SpO2_win(end+1) = NaN; %#ok<AGROW>
-            t_win(end+1)    = (idx + winLen/2 - 1) / fs; %#ok<AGROW>
-            R_vals(end+1)   = NaN; %#ok<AGROW>
+            wIdx = wIdx + 1;
+            SpO2_win(wIdx) = NaN;
+            t_win(wIdx)    = (idx + winLen/2 - 1) / fs;
+            R_vals(wIdx)   = NaN;
             idx = idx + step;
             continue;
         end
@@ -101,9 +106,10 @@ function [SpO2_mean, SpO2_win, t_win, R_vals] = ippg_spo2_fft(redSig, irSig, fs,
         DC_ir  = mean(segIR_raw);
 
         if DC_red == 0 || DC_ir == 0 || ~isfinite(DC_red) || ~isfinite(DC_ir)
-            SpO2_win(end+1) = NaN; %#ok<AGROW>
-            t_win(end+1)    = (idx + winLen/2 - 1) / fs; %#ok<AGROW>
-            R_vals(end+1)   = NaN; %#ok<AGROW>
+            wIdx = wIdx + 1;
+            SpO2_win(wIdx) = NaN;
+            t_win(wIdx)    = (idx + winLen/2 - 1) / fs;
+            R_vals(wIdx)   = NaN;
             idx = idx + step;
             continue;
         end
@@ -113,7 +119,8 @@ function [SpO2_mean, SpO2_win, t_win, R_vals] = ippg_spo2_fft(redSig, irSig, fs,
         R     = R_RED / R_IR;
 
         % Store R for later calibration
-        R_vals(end+1) = R; %#ok<AGROW>
+        wIdx = wIdx + 1;
+        R_vals(wIdx) = R;
 
         % TEMPORARY calibration (from Thinh's example) – replace with your own later
       % example: subject had true SpO2_true = 97 at R_mean
@@ -123,13 +130,18 @@ R_mean    = mean(R_vals(isfinite(R_vals)));  % from that run
 A = SpO2_true + 28 * R_mean;
 SpO2_est = A - 28 * R;
 
-        SpO2_win(end+1) = SpO2_est; %#ok<AGROW>
+        SpO2_win(wIdx) = SpO2_est;
 
         % Center time of this window
-        t_win(end+1) = (idx + winLen/2 - 1) / fs; %#ok<AGROW>
+        t_win(wIdx) = (idx + winLen/2 - 1) / fs;
 
         idx = idx + step;
     end
+
+    % Trim to actual number of windows
+    SpO2_win = SpO2_win(1:wIdx);
+    t_win    = t_win(1:wIdx);
+    R_vals   = R_vals(1:wIdx);
 
     % Final mean, ignoring NaNs
     valid = isfinite(SpO2_win);

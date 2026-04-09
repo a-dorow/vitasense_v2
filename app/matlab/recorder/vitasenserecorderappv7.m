@@ -624,7 +624,7 @@ refresh_bp_models();
                 [vp, vn] = fileparts(filepath);
                 jsonPath = fullfile(vp, string(vn) + "_vitals.json");
 
-                [hr_bpm, spo2_pct] = run_pipeline_on_video(filepath, ...
+                [hr_bpm, spo2_pct, rawColorSignal, pipeline_Fs] = run_pipeline_on_video(filepath, ...
                     'doPopup',   doPopup, ...
                     'writeJson', writeJson, ...
                     'jsonPath',  jsonPath);
@@ -636,10 +636,11 @@ refresh_bp_models();
                 logmsg(sprintf("Pipeline results -> HR: %.2f bpm | SpO2: %.2f %%", hr_bpm, spo2_pct));
 
                 % BP: call from GUI if checkbox enabled (independent of processing mode)
+                % Pass rawColorSignal and Fs from pipeline to avoid re-extracting RGB
                 if logical(ui.runBP.Value)
                     try
                         logmsg("BP checkbox enabled -> running BP server call...");
-                        run_bp_quick_popup(filepath, subfolder, basename);
+                        run_bp_quick_popup(filepath, subfolder, basename, rawColorSignal, pipeline_Fs);
                     catch ME
                         logErr(ME);
                     end
@@ -846,9 +847,9 @@ refresh_bp_models();
         end
     end
 
-    function run_bp_quick_popup(video_path, subfolder, basename)
-        % End-only BP for Quick Popup mode:
-        % - Extract mean RGB (Viola-Jones + KLT function)
+    function run_bp_quick_popup(video_path, subfolder, basename, preExtractedRGB, preExtractedFs)
+        % End-only BP:
+        % - Reuse pre-extracted RGB from pipeline when available
         % - Drop first 6 seconds
         % - Save trial-specific MAT next to video
         % - Call Python server /predict_summary
@@ -876,38 +877,44 @@ refresh_bp_models();
             return;
         end
 
-        if ~isfile(video_path)
-            logmsg("Video not found: " + string(video_path));
-            return;
-        end
+        % Reuse pre-extracted RGB signal from pipeline if available
+        if nargin >= 5 && ~isempty(preExtractedRGB) && size(preExtractedRGB,1) >= 10 && ~isnan(preExtractedFs)
+            rawColorSignal = preExtractedRGB;
+            fs_in = preExtractedFs;
+            logmsg("BP: reusing pre-extracted RGB from pipeline.");
+        else
+            % Fallback: extract from video (slower path)
+            if ~isfile(video_path)
+                logmsg("Video not found: " + string(video_path));
+                return;
+            end
 
-        % Minimal deterministic settings for KLT extractor
-        videoSettings = struct();
-        videoSettings.isHSVmaskingOn = false;
-        videoSettings.hsvMin = [0 0 0];
-        videoSettings.hsvMax = [1 1 1];
-        videoSettings.isSTDmaskingOn = false;
-        videoSettings.stdCoef = 2.5;
+            videoSettings = struct();
+            videoSettings.isHSVmaskingOn = false;
+            videoSettings.hsvMin = [0 0 0];
+            videoSettings.hsvMax = [1 1 1];
+            videoSettings.isSTDmaskingOn = false;
+            videoSettings.stdCoef = 2.5;
 
-        try
-            rawColorSignal = extract_color_channels_from_video_KLT_v2(video_path, videoSettings);
-        catch ME
-            logErr(ME);
-            logmsg("BP: extract_color_channels_from_video_KLT_v2 failed.");
-            return;
-        end
+            try
+                rawColorSignal = extract_color_channels_from_video_KLT_v2(video_path, videoSettings);
+            catch ME
+                logErr(ME);
+                logmsg("BP: extract_color_channels_from_video_KLT_v2 failed.");
+                return;
+            end
 
-        if isempty(rawColorSignal) || size(rawColorSignal,1) < 10
-            logmsg("BP: rawColorSignal empty/too short.");
-            return;
-        end
+            if isempty(rawColorSignal) || size(rawColorSignal,1) < 10
+                logmsg("BP: rawColorSignal empty/too short.");
+                return;
+            end
 
-        % Determine fs_in from VideoReader (fallback to UI fps)
-        try
-            vr = VideoReader(video_path);
-            fs_in = vr.FrameRate;
-        catch
-            fs_in = double(ui.fps.Value);
+            try
+                vr = VideoReader(video_path);
+                fs_in = vr.FrameRate;
+            catch
+                fs_in = double(ui.fps.Value);
+            end
         end
 
         N = size(rawColorSignal,1);

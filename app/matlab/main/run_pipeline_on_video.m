@@ -1,9 +1,13 @@
-function [hr_bpm, spo2_pct] = run_pipeline_on_video(video_path, varargin)
+function [hr_bpm, spo2_pct, rawColorSignal, Fs] = run_pipeline_on_video(video_path, varargin)
 % run_pipeline_on_video - wrapper to call pipeline and optionally write JSON
 % Optional args (name/value):
 %   'doPopup'   (logical) default false
 %   'writeJson' (logical) default false
 %   'jsonPath'  (char/string) default: <video_dir>\<video_name>_vitals.json
+%
+% Additional outputs (for BP reuse — avoids re-extracting RGB):
+%   rawColorSignal : [Nframes x 3] extracted RGB signal
+%   Fs             : video frame rate (Hz)
 
     setup_paths();
 
@@ -29,7 +33,7 @@ function [hr_bpm, spo2_pct] = run_pipeline_on_video(video_path, varargin)
     if ~isfolder(plot_path), mkdir(plot_path); end
     if ~isfolder(trace_folder), mkdir(trace_folder); end
 
-    [hr_bpm, spo2_pct] = iPPG_pipeline_v4(video_path, plot_path, trace_folder, repo_root, doPopup);
+    [hr_bpm, spo2_pct, rawColorSignal, Fs] = iPPG_pipeline_v4(video_path, plot_path, trace_folder, repo_root, doPopup);
 
     if writeJson
         if strlength(jsonPath) == 0
