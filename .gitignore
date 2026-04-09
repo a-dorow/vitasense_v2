@@ -1,57 +1,6 @@
-﻿# Python envs
-third_party/bpenv/
-.venv/
-__pycache__/
-*.pyc
-
-# Data + recordings
-data/
-*.avi
-*.mp4
-
-# MATLAB outputs
-*.fig
-*.mat
-*.asv
-*.m~
-
-# Generated outputs
-*_vitals.json
-bp_input.mat
-bp_summary.json
-
-# OS
-.DS_Store
-Thumbs.db
-
-
-# Models (do not commit weights)
-models/*.h5
-models/*.hdf5
-models/*.ckpt
-models/*.pt
-models/*.onnx
-
-# --- generated outputs (never commit) ---
+# Output files
 outputs/
-outputs/**
 
-# If you ever want to keep a folder but ignore contents, use:
-# outputs/**
-# !outputs/.gitkeep
-
-# Pipeline outputs
-outputs/
-FFT_RESULTS/
-
-# logs
-*.csv
-
-# matlab junk
-*.asv
-
-# python
-__pycache__/
-*.pyc
-venv/
-desktop.ini
+# Data files
+*.xlsx
+*.png
