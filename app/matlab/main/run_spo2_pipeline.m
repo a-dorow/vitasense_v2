@@ -72,11 +72,11 @@ clear; clc;
 setup_paths();
 
 % ---------------- Fixed Paths ----------------
-base_plot_path   = 'D:\Final Senior Desgn Data\Plots';
-base_trace_path  = 'D:\Final Senior Desgn Data\Traces';
-main_path        = 'D:\Final Senior Desgn Data\';
+base_plot_path   = 'D:\Remainder of Final dataset\Plots';
+base_trace_path  = 'D:\Remainder of Final dataset\Traces';
+main_path        = 'D:\Remainder of Final dataset';
 
-video_root       = 'D:\Final Senior Desgn Data\finaldataset';
+video_root       = 'D:\Remainder of Final dataset';
 
 % ---------------- Find subject folders ----------------
 subjectDirs = dir(fullfile(video_root, 'subject_*'));

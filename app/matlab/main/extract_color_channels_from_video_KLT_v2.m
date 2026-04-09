@@ -37,8 +37,24 @@ function rawColorSignal = extract_color_channels_from_video_KLT_v2(video_input, 
     % Slightly higher merge threshold can reduce jittery detections
     faceDetector.MergeThreshold = 4;
 
+    % ---- Tune detector sensitivity for low-resolution video ----
+    % Viola-Jones struggles at 240p and below: a finer scale pyramid and
+    % more lenient merge threshold give it a better chance of finding a
+    % small face.  We also extend the wait window so more frames are
+    % searched before falling back to the full-frame ROI.
+    firstFrame    = readFrame(videoReader);
+    [fH, fW, ~]   = size(firstFrame);
+    videoReader.CurrentTime = 0;   % rewind so the detection loop sees every frame
+
+    if fH <= 240 || fW <= 320
+        faceDetector.ScaleFactor  = 1.05;   % finer scale pyramid for small faces
+        faceDetector.MergeThreshold = 2;    % more lenient merging at low-res
+        maxWaitSec = 10;                    % wait longer at low-res
+    else
+        maxWaitSec = 5;                     % DEFAULT: wait up to 5 seconds
+    end
+
     %% ---------- Wait until a valid face is detected ----------
-    maxWaitSec = 5;                      % DEFAULT: wait up to 5 seconds
     maxWaitFrames = max(1, round(maxWaitSec * fps));
 
     found = false;
@@ -62,12 +78,27 @@ function rawColorSignal = extract_color_channels_from_video_KLT_v2(video_input, 
     end
 
     if ~found
-        warning("No face detected in first %.1f seconds; skipping video.", maxWaitSec);
-        rawColorSignal = [];
-        return;
-    end
+        % ---- Full-frame ROI fallback for low-resolution video ----
+        % When Viola-Jones cannot find a face (common at 240p), use a
+        % centre-crop of the frame as the ROI so the rest of the pipeline
+        % still runs.  Signal quality will be lower than a true face ROI,
+        % but this is expected and is the scientific point of the
+        % resolution comparison experiment.
+        warning("No face detected in first %.1f seconds; using full-frame centre-crop ROI fallback.", maxWaitSec);
 
-    bboxPoints = double(bbox2points(bbox));
+        videoReader.CurrentTime = 0;        % rewind to frame 1
+        videoFrame  = readFrame(videoReader);
+        frameCount  = 1;
+
+        % Use centre 60 % (width) x 60 % (height) of the frame
+        x1 = round(fW * 0.20);  x2 = round(fW * 0.80);
+        y1 = round(fH * 0.10);  y2 = round(fH * 0.70);
+        bbox       = [x1, y1, x2-x1, y2-y1];
+        bboxPoints = double(bbox2points(bbox));
+        found      = true;   % proceed with fallback ROI
+    else
+        bboxPoints = double(bbox2points(bbox));
+    end
 
     %% ---------- Detect features inside face ROI ----------
     grayFrame = im2gray(videoFrame);

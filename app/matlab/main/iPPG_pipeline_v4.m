@@ -67,6 +67,7 @@ for i = 1:length(vid_direct)
     rawColorSignal = extract_color_channels_from_video_KLT_v2(this_video, videoSettings);
 
     if isempty(rawColorSignal) || numel(rawColorSignal) < 10
+        warning('[iPPG_pipeline_v4] No color signal extracted for %s. Face detection likely failed at this resolution — skipping subject.', subject_name);
         continue;
     end
 
@@ -88,6 +89,18 @@ for i = 1:length(vid_direct)
     try
         redSig   = rawRGB(1,:).';
         greenSig = rawRGB(2,:).';
+
+        % Skip the first 6 seconds: camera/face-detection is still
+        % stabilising and the signal is unreliable during that period.
+        % Processing speed can push stabilisation beyond 6 s, so we
+        % use a generous skip to ensure only settled signal is used.
+        skipSec     = 6;
+        skipSamples = floor(skipSec * Fs);
+        if skipSamples >= length(redSig)
+            skipSamples = 0;   % video is too short; skip nothing
+        end
+        redSig   = redSig(skipSamples+1:end);
+        greenSig = greenSig(skipSamples+1:end);
 
         winLenSec = 4;
         stepSec   = 2;
@@ -162,6 +175,13 @@ for i = 1:length(vid_direct)
             % swallow plot/save errors per-method
         end
         close(fig);
+    end
+
+    % ---- Diagnostic: warn if no .fig files were saved for this subject ----
+    % This catches cases where every method's plot/save silently failed.
+    saved_figs = dir(fullfile(subject_folder, '*.fig'));
+    if isempty(saved_figs)
+        warning('[iPPG_pipeline_v4] No .fig files saved for subject "%s". Check extraction or plot errors above.', subject_name);
     end
 
     % Save SpO2 summary (once per video)
