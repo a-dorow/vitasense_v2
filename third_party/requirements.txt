@@ -6,3 +6,5 @@ h5py
 fastapi
 uvicorn 
 pydantic
+httpx
+python-multipart

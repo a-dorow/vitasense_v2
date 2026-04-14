@@ -200,7 +200,7 @@ ax3.set_xticks(x)
 ax3.set_xticklabels(RES_ORDER, fontsize=11)
 ax3.set_xlabel("Resolution", fontsize=11, color="#555555")
 ax3.set_ylabel("Mean HR difference (bpm)", fontsize=11, color="#555555")
-ax3.set_title("Figure 3 — Mean error by resolution × distance", fontsize=12,
+ax3.set_title("Mean Error by Resolution × Distance", fontsize=12,
               fontweight="normal", pad=10, color="#222222")
 ax3.set_ylim(0, 16)
 ax3.yaxis.grid(True, color="#e5e5e5", linewidth=0.8, zorder=0)
@@ -208,7 +208,9 @@ ax3.set_axisbelow(True)
 ax3.legend(title="Distance", fontsize=9, title_fontsize=9,
            framealpha=0.6, edgecolor="#cccccc")
 plt.tight_layout()
-fig3.savefig("figure3_heatmap_bars.png")
+#Set resolution of saved figure to 300 DPI for high quality
+resolution = 300
+fig3.savefig("figure3_heatmap_bars.png", dpi=resolution)
 print("Saved: figure3_heatmap_bars.png")
 plt.close(fig3)
 
@@ -253,7 +255,7 @@ ax4.annotate(f"80% power\nn = {target_n}/group\n({target_n * 4} total)",
 
 ax4.set_xlabel("n per resolution group", fontsize=11, color="#555555")
 ax4.set_ylabel("Statistical power", fontsize=11, color="#555555")
-ax4.set_title("Figure 4 — Power curve for resolution effect\n(Monte Carlo resampling, 3000 simulations)",
+ax4.set_title("Power Curve for Resolution effect\n(Monte Carlo resampling, 3000 simulations)",
               fontsize=12, fontweight="normal", pad=10, color="#222222")
 ax4.set_xlim(0, 85)
 ax4.set_ylim(0, 1.05)

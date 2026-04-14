@@ -46,7 +46,7 @@ function ippgSettings = configure_ippg_settings(VIDEO_SR)
      
 ippgSettings.processing = [ippgSettings.PROCESSING.OUTLIERS_SUPPRESSION,...
                              ippgSettings.PROCESSING.POST_BANDPASS_FILTER ];                     
-ippgSettings.extractionMethod = 'AGRD';
+ippgSettings.extractionMethod = 'CHROM';
 
     % Original Settings
 

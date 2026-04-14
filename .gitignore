@@ -1,18 +1,62 @@
-# Output files
+# ── Output files ──────────────────────────────────────────────
 outputs/
 Extraction Methods/
 FFT_RESULTS/
 
-# Data files
+# ── Data files ────────────────────────────────────────────────
 data/
 *.xlsx
 *.png
 *.fig
 *.mat
 
-# Models
+# ── Models (machine-specific, never commit weights) ───────────
 models/
+*.h5
+*.keras
+*.pkl
+*.pt
+*.pth
 
-# Python
+# ── Machine-specific config (gitignored, use template instead) ─
+app/vitasense_server/local_config.py
+app/python_server/local_config.py
+*.local.py
+*.local.env
+.env
+.env.*
+
+# ── Python ────────────────────────────────────────────────────
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
 third_party/bpenv/
+
+# ── Node / React UI ───────────────────────────────────────────
+app/ui/node_modules/
+app/ui/dist/
+
+# ── MATLAB generated files ────────────────────────────────────
+*.asv
+slprj/
+*.mex*
+codegen/
+
+# ── OS junk ───────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE ───────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.user"app/stats/.claude/ 
+app/vitasense_server/venv310/
