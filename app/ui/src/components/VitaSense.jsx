@@ -241,7 +241,33 @@ export default function VitaSense() {
       </header>
 
       <main className="vs-main">
-        {/* Camera panel */}
+        {/* Left panel — HR + SpO2 */}
+        <section className="vitals-section">
+          <h2 className="vitals-heading">Cardiovascular</h2>
+          <div className="vitals-grid">
+            <VitalCard label="Heart Rate" unit="bpm" value={results?.hr_bpm}    icon="♥" accent="#ff6b00" normal={[60,100]} limits={[40,200]} active={appState===STATES.RESULTS} />
+            <VitalCard label="SpO₂"       unit="%"   value={results?.spo2_pct}  icon="◉" accent="#00d4ff" normal={[95,100]} limits={[80,100]} active={appState===STATES.RESULTS} />
+          </div>
+          {appState === STATES.IDLE && (
+            <div className="instructions">
+              <p className="instr-title">How it works</p>
+              <ol className="instr-list">
+                <li>Stand <strong>50–80 cm</strong> from the camera</li>
+                <li>Face the camera in <strong>good lighting</strong></li>
+                <li>Remain <strong>still</strong> for 20 seconds</li>
+                <li>Results appear automatically</li>
+              </ol>
+            </div>
+          )}
+          {appState === STATES.PROCESSING && (
+            <div className="processing-live">
+              <p className="processing-live-label">Pipeline status</p>
+              <div className="processing-live-msg">{processingMsg}</div>
+            </div>
+          )}
+        </section>
+
+        {/* Center — Camera */}
         <section className="camera-section">
           <div className={`camera-frame ${borderClass}`}>
             <div className="corner tl"/><div className="corner tr"/>
@@ -306,40 +332,17 @@ export default function VitaSense() {
           </div>
         </section>
 
-        {/* Vitals panel */}
+        {/* Right panel — Blood Pressure */}
         <section className="vitals-section">
-          <h2 className="vitals-heading">Vital Signs</h2>
-
+          <h2 className="vitals-heading">Blood Pressure</h2>
           <div className="vitals-grid">
-            <VitalCard label="Heart Rate"   unit="bpm"  value={results?.hr_bpm}                                        icon="♥" accent="#ff4d6d" normal={[60,100]}   limits={[40,200]}   active={appState===STATES.RESULTS} />
-            <VitalCard label="SpO₂"         unit="%"    value={results?.spo2_pct}                                      icon="◉" accent="#00d4ff" normal={[95,100]}   limits={[80,100]}   active={appState===STATES.RESULTS} />
-            <VitalCard label="Systolic BP"  unit="mmHg" value={results?.sbp_mean != null ? Math.round(results.sbp_mean) : null} icon="↑" accent="#a78bfa" normal={[90,120]}   limits={[70,180]}   active={appState===STATES.RESULTS} />
-            <VitalCard label="Diastolic BP" unit="mmHg" value={results?.dbp_mean != null ? Math.round(results.dbp_mean) : null} icon="↓" accent="#34d399" normal={[60,80]}    limits={[40,120]}   active={appState===STATES.RESULTS} />
+            <VitalCard label="Systolic"  unit="mmHg" value={results?.sbp_mean != null ? Math.round(results.sbp_mean) : null} icon="↑" accent="#00ff88" normal={[90,120]} limits={[70,180]} active={appState===STATES.RESULTS} />
+            <VitalCard label="Diastolic" unit="mmHg" value={results?.dbp_mean != null ? Math.round(results.dbp_mean) : null} icon="↓" accent="#a78bfa" normal={[60,80]}  limits={[40,120]} active={appState===STATES.RESULTS} />
           </div>
-
           {appState === STATES.RESULTS && results?.sbp_std != null && (
             <div className="bp-detail">
-              <span>BP variability</span>
-              <span>{Math.round(results.sbp_mean)} ± {Math.round(results.sbp_std)} / {Math.round(results.dbp_mean)} ± {Math.round(results.dbp_std)} mmHg</span>
-            </div>
-          )}
-
-          {appState === STATES.IDLE && (
-            <div className="instructions">
-              <p className="instr-title">How it works</p>
-              <ol className="instr-list">
-                <li>Stand <strong>50–80 cm</strong> from the camera</li>
-                <li>Face the camera in <strong>good lighting</strong></li>
-                <li>Remain <strong>still</strong> for 20 seconds</li>
-                <li>Results appear automatically</li>
-              </ol>
-            </div>
-          )}
-
-          {appState === STATES.PROCESSING && (
-            <div className="processing-live">
-              <p className="processing-live-label">Pipeline status</p>
-              <div className="processing-live-msg">{processingMsg}</div>
+              <span>Variability</span>
+              <span>±{Math.round(results.sbp_std)} / ±{Math.round(results.dbp_std)} mmHg</span>
             </div>
           )}
         </section>
