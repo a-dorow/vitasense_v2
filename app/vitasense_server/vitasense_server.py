@@ -6,8 +6,15 @@ Main VitaSense kiosk backend.
 Endpoints:
   GET  /health         → liveness check
   POST /analyze        → upload video, starts pipeline, returns job_id
-  GET  /progress/{id} → SSE stream of pipeline progress + final result
+  GET  /progress/{id} → SSE stream of pipeline progress + chunked results
   GET  /              → serve React UI
+
+SSE event types:
+  { type: "progress",        message: str }
+  { type: "vitals_partial",  hr_bpm, spo2_pct }   ← fires as soon as MATLAB returns
+  { type: "vitals_partial",  sbp_mean, sbp_std, dbp_mean, dbp_std } ← fires after BP server
+  { type: "result",          data: { all four vitals } }  ← final complete payload
+  { type: "error",           message: str }
 
 Run from app/vitasense_server/:
   uvicorn vitasense_server:app --host 0.0.0.0 --port 6767 --reload
@@ -41,7 +48,6 @@ UI_DIST    = APP_DIR / "ui" / "dist"
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "vitasense_uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-# Single worker — MATLAB can only run one pipeline at a time anyway
 executor = ThreadPoolExecutor(max_workers=1)
 
 try:
@@ -51,18 +57,24 @@ except (ImportError, AttributeError):
     FFMPEG_EXE = "ffmpeg"
 
 # ── Job store ─────────────────────────────────────────────────────────────────
-# job_id -> { progress: [str], result: dict|None, error: str|None, done: bool }
+# job_id -> {
+#   progress:  [str],
+#   partials:  [dict],   ← list of partial vital chunks
+#   result:    dict|None,
+#   error:     str|None,
+#   done:      bool
+# }
 _jobs: dict = {}
 _jobs_lock  = threading.Lock()
 # ─────────────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="VitaSense Kiosk", version="2.0")
+app = FastAPI(title="VitaSense Kiosk", version="2.1")
 
 
 @app.on_event("startup")
 def on_startup():
-    """Start MATLAB engine in background when server boots."""
     matlab_runner.start_engine_async()
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -86,10 +98,6 @@ def health():
 # ── Upload → job_id ───────────────────────────────────────────────────────────
 @app.post("/analyze")
 async def analyze(video: UploadFile = File(...)):
-    """
-    Saves video, registers job, kicks off background thread, returns job_id.
-    Client connects to /progress/{job_id} for SSE updates.
-    """
     uid         = uuid.uuid4().hex
     subject_tag = f"subject_1_{uid[:8]}"
     webm_path   = UPLOAD_DIR / f"{subject_tag}.webm"
@@ -104,12 +112,12 @@ async def analyze(video: UploadFile = File(...)):
     with _jobs_lock:
         _jobs[job_id] = {
             "progress": [],
+            "partials": [],
             "result":   None,
             "error":    None,
             "done":     False,
         }
 
-    # Start pipeline in a real background thread (not awaited)
     t = threading.Thread(
         target=_run_pipeline_job,
         args=(job_id, webm_path, mp4_path),
@@ -124,30 +132,34 @@ async def analyze(video: UploadFile = File(...)):
 # ── SSE progress stream ───────────────────────────────────────────────────────
 @app.get("/progress/{job_id}")
 async def progress_stream(job_id: str):
-    """
-    SSE stream — stays open until pipeline finishes.
-    Sends keepalive comments every 5s so the connection doesn't drop.
-    """
     if job_id not in _jobs:
         raise HTTPException(status_code=404, detail="Job not found")
 
     async def event_stream():
-        sent = 0
-        keepalive = 0
+        sent_progress = 0
+        sent_partials = 0
+        keepalive     = 0
 
         while True:
             with _jobs_lock:
-                job  = _jobs.get(job_id, {})
-                msgs = list(job.get("progress", []))
-                done = job.get("done", False)
-                err  = job.get("error")
-                res  = job.get("result")
+                job      = _jobs.get(job_id, {})
+                msgs     = list(job.get("progress", []))
+                partials = list(job.get("partials", []))
+                done     = job.get("done", False)
+                err      = job.get("error")
+                res      = job.get("result")
 
-            # Send any new progress messages
-            while sent < len(msgs):
-                payload = json.dumps({"type": "progress", "message": msgs[sent]})
+            # Progress messages
+            while sent_progress < len(msgs):
+                payload = json.dumps({"type": "progress", "message": msgs[sent_progress]})
                 yield f"data: {payload}\n\n"
-                sent += 1
+                sent_progress += 1
+
+            # Partial vital chunks (hr/spo2 first, then bp)
+            while sent_partials < len(partials):
+                payload = json.dumps({"type": "vitals_partial", **partials[sent_partials]})
+                yield f"data: {payload}\n\n"
+                sent_partials += 1
 
             if done:
                 if err:
@@ -157,7 +169,6 @@ async def progress_stream(job_id: str):
                 yield f"data: {payload}\n\n"
                 break
 
-            # Keepalive comment every ~5s so browser doesn't close connection
             keepalive += 1
             if keepalive % 10 == 0:
                 yield f": keepalive\n\n"
@@ -168,9 +179,9 @@ async def progress_stream(job_id: str):
         event_stream(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control":      "no-cache",
-            "X-Accel-Buffering":  "no",
-            "Connection":         "keep-alive",
+            "Cache-Control":     "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection":        "keep-alive",
         },
     )
 
@@ -183,6 +194,13 @@ def _run_pipeline_job(job_id: str, webm_path: Path, mp4_path: Path):
         with _jobs_lock:
             if job_id in _jobs:
                 _jobs[job_id]["progress"].append(msg)
+
+    def push_partial(chunk: dict):
+        """Push a partial vitals chunk — SSE will stream it immediately."""
+        print(f"[job:{job_id[:8]}] partial: {chunk}")
+        with _jobs_lock:
+            if job_id in _jobs:
+                _jobs[job_id]["partials"].append(chunk)
 
     def finish(result: Optional[dict] = None, error: Optional[str] = None):
         print(f"[job:{job_id[:8]}] {'DONE' if result else 'ERROR'}: {result or error}")
@@ -199,37 +217,48 @@ def _run_pipeline_job(job_id: str, webm_path: Path, mp4_path: Path):
         push("Video ready.")
 
         # 2. MATLAB pipeline
-        push("Starting MATLAB (this takes ~30s to launch)...")
+        # partial_callback fires as soon as MATLAB returns hr + spo2
+        push("Starting MATLAB pipeline...")
         matlab_result = matlab_runner.run_pipeline(
             str(mp4_path),
             progress_callback=push,
+            partial_callback=push_partial,   # ← streams hr/spo2 immediately
         )
 
-        hr_bpm   = matlab_result.get("hr_bpm")
-        spo2_pct = matlab_result.get("spo2_pct")
-        fig_path = matlab_result.get("fig_path")
+        hr_bpm      = matlab_result.get("hr_bpm")
+        spo2_pct    = matlab_result.get("spo2_pct")
+        ippg_signal = matlab_result.get("ippg_signal", [])
+        fs_hz       = matlab_result.get("fs_hz", 30.0)
 
-        # 3. BP prediction
+        # 3. BP prediction — runs after MATLAB, result streamed as second partial
         bp_data = {}
-        if fig_path and bp_client.is_bp_server_alive():
+        if ippg_signal and len(ippg_signal) >= 10 and bp_client.is_bp_server_alive():
             push("Estimating blood pressure...")
             try:
-                bp_data = bp_client.predict_bp(fig_path)
+                bp_data = bp_client.predict_bp_from_array(ippg_signal, fs_hz)
+
+                # Clamp BP to physiological limits
+                sbp = bp_data.get("sbp_mean")
+                dbp = bp_data.get("dbp_mean")
+
+                if sbp is not None and (sbp < 70 or sbp > 180):
+                    print(f"[job] SBP {sbp:.1f} outside limits, discarding BP")
+                    bp_data = {}
+                elif dbp is not None and (dbp < 40 or dbp > 120):
+                    print(f"[job] DBP {dbp:.1f} outside limits, discarding BP")
+                    bp_data = {}
+                else:
+                    # Stream BP as its own partial chunk
+                    push_partial(bp_data)
+
             except Exception as e:
                 print(f"[job:{job_id[:8]}] BP error: {e}")
                 bp_data = {}
-
-        # Clamp BP to physiological limits
-        if bp_data.get("sbp_mean") is not None:
-            sbp = bp_data["sbp_mean"]
-            if sbp < 70 or sbp > 180:
-                print(f"[job] SBP {sbp:.1f} outside limits, discarding BP")
-                bp_data = {}
-        if bp_data.get("dbp_mean") is not None:
-            dbp = bp_data["dbp_mean"]
-            if dbp < 40 or dbp > 120:
-                print(f"[job] DBP {dbp:.1f} outside limits, discarding BP")
-                bp_data = {}
+        else:
+            if not ippg_signal or len(ippg_signal) < 10:
+                print(f"[job:{job_id[:8]}] No signal for BP prediction.")
+            if not bp_client.is_bp_server_alive():
+                print(f"[job:{job_id[:8]}] BP server not alive, skipping.")
 
         push("Done!")
         finish(result={
@@ -239,7 +268,7 @@ def _run_pipeline_job(job_id: str, webm_path: Path, mp4_path: Path):
         })
 
     except TimeoutExpired:
-        finish(error="MATLAB pipeline timed out. Try increasing timeout in matlab_runner.py.")
+        finish(error="MATLAB pipeline timed out.")
     except RuntimeError as e:
         finish(error=str(e))
     except Exception as e:

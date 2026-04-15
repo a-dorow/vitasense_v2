@@ -13,21 +13,185 @@ const STATES = {
   ERROR:      "error",
 };
 
-export default function VitaSense() {
-  const videoRef        = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const chunksRef       = useRef([]);
-  const streamRef       = useRef(null);
-  const alignTimerRef   = useRef(null);
-  const esRef           = useRef(null);  // EventSource ref
+// Normalise a value to 0..1 within [min, max]
+function norm(val, min, max) {
+  if (val == null || !isFinite(val)) return 0;
+  return Math.max(0, Math.min(1, (val - min) / (max - min)));
+}
 
-  const [appState,     setAppState]     = useState(STATES.IDLE);
-  const [progress,     setProgress]     = useState(0);
-  const [timeLeft,     setTimeLeft]     = useState(RECORD_SECONDS);
+// Convert polar (angle, radius) to SVG cartesian coords
+// angle 0 = top, clockwise
+function polar(cx, cy, r, angleDeg) {
+  const rad = ((angleDeg - 90) * Math.PI) / 180;
+  return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+}
+
+// Build SVG polygon points string from normalised values [0..1] and axes config
+function radarPoints(values, cx, cy, maxR, axes) {
+  return axes
+    .map((_, i) => {
+      const angle = (360 / axes.length) * i;
+      const r = values[i] * maxR;
+      return polar(cx, cy, r, angle).join(",");
+    })
+    .join(" ");
+}
+
+const RADAR_AXES = [
+  { key: "hr_bpm",   label: "HR",   min: 40,  max: 180, color: "#ff6b00" },
+  { key: "spo2_pct", label: "SpO₂", min: 85,  max: 100, color: "#00d4ff" },
+  { key: "sbp_mean", label: "SBP",  min: 70,  max: 180, color: "#00ff88" },
+  { key: "dbp_mean", label: "DBP",  min: 40,  max: 120, color: "#a78bfa" },
+];
+
+// ── Radar SVG component ───────────────────────────────────────────────────────
+function RadarChart({ vitals }) {
+  const cx = 160, cy = 160, maxR = 110;
+  const n = RADAR_AXES.length;
+
+  const values = RADAR_AXES.map(({ key, min, max }) =>
+    norm(vitals[key], min, max)
+  );
+
+  // Grid rings
+  const rings = [0.25, 0.5, 0.75, 1.0];
+
+  // Spoke endpoints
+  const spokes = RADAR_AXES.map((_, i) => {
+    const angle = (360 / n) * i;
+    return polar(cx, cy, maxR, angle);
+  });
+
+  // Filled polygon
+  const filledPts = radarPoints(values, cx, cy, maxR, RADAR_AXES);
+
+  // Label positions (slightly outside maxR)
+  const labelPts = RADAR_AXES.map((axis, i) => {
+    const angle = (360 / n) * i;
+    const [lx, ly] = polar(cx, cy, maxR + 26, angle);
+    return { ...axis, lx, ly };
+  });
+
+  return (
+    <svg
+      viewBox="0 0 320 320"
+      width="320"
+      height="320"
+      className="radar-svg"
+    >
+      {/* Grid rings */}
+      {rings.map((r, ri) => (
+        <polygon
+          key={ri}
+          points={radarPoints(
+            Array(n).fill(r),
+            cx, cy, maxR, RADAR_AXES
+          )}
+          fill="none"
+          stroke="#00d4ff"
+          strokeWidth="0.8"
+          opacity="0.2"
+        />
+      ))}
+
+      {/* Spokes */}
+      {spokes.map(([sx, sy], i) => (
+        <line
+          key={i}
+          x1={cx} y1={cy}
+          x2={sx} y2={sy}
+          stroke="#ff6b00"
+          strokeWidth="1"
+          opacity="0.5"
+        />
+      ))}
+
+      {/* Filled area */}
+      <polygon
+        points={filledPts}
+        fill="#00ff88"
+        fillOpacity="0.12"
+        stroke="#00d4ff"
+        strokeWidth="2"
+        strokeLinejoin="round"
+        className="radar-fill"
+      />
+
+      {/* Axis dots */}
+      {RADAR_AXES.map(({ color }, i) => {
+        const angle = (360 / n) * i;
+        const r = values[i] * maxR;
+        const [dx, dy] = polar(cx, cy, r, angle);
+        return (
+          <circle
+            key={i}
+            cx={dx} cy={dy} r="5"
+            fill={color}
+            style={{ filter: `drop-shadow(0 0 6px ${color})` }}
+            className="radar-dot"
+          />
+        );
+      })}
+
+      {/* Labels */}
+      {labelPts.map(({ label, color, lx, ly, key, min, max }, i) => {
+        const val = vitals[key];
+        const hasVal = val != null && isFinite(val);
+        return (
+          <g key={i}>
+            <text
+              x={lx} y={ly - 6}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fill={color}
+              fontSize="13"
+              fontFamily="DM Mono, monospace"
+              fontWeight="500"
+              style={{ filter: `drop-shadow(0 0 6px ${color})` }}
+            >
+              {label}
+            </text>
+            {hasVal && (
+              <text
+                x={lx} y={ly + 10}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fill="#f0f6ff"
+                fontSize="11"
+                fontFamily="DM Mono, monospace"
+                opacity="0.8"
+              >
+                {Number.isInteger(val) ? val : val.toFixed(1)}
+              </text>
+            )}
+          </g>
+        );
+      })}
+
+      {/* Center dot */}
+      <circle cx={cx} cy={cy} r="3" fill="#ff6b00" opacity="0.6" />
+    </svg>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+export default function VitaSense() {
+  const videoRef         = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const chunksRef        = useRef([]);
+  const streamRef        = useRef(null);
+  const alignTimerRef    = useRef(null);
+  const esRef            = useRef(null);
+
+  const [appState,      setAppState]      = useState(STATES.IDLE);
+  const [progress,      setProgress]      = useState(0);
+  const [timeLeft,      setTimeLeft]      = useState(RECORD_SECONDS);
   const [processingMsg, setProcessingMsg] = useState("Starting pipeline...");
-  const [results,      setResults]      = useState(null);
-  const [errorMsg,     setErrorMsg]     = useState("");
-  const [faceAligned,  setFaceAligned]  = useState(false);
+  const [results,       setResults]       = useState(null);
+  const [partialVitals, setPartialVitals] = useState({});  // accumulates as partials arrive
+  const [showRadar,     setShowRadar]     = useState(false);
+  const [errorMsg,      setErrorMsg]      = useState("");
+  const [faceAligned,   setFaceAligned]   = useState(false);
 
   // Start webcam on mount
   useEffect(() => {
@@ -42,13 +206,11 @@ export default function VitaSense() {
           },
           audio: false,
         });
-
         const track    = stream.getVideoTracks()[0];
         const settings = track.getSettings();
         if (settings.frameRate && settings.frameRate < 24) {
           console.warn(`[VitaSense] Camera granted ${settings.frameRate} fps — pipeline expects 30.`);
         }
-
         streamRef.current = stream;
         if (videoRef.current) videoRef.current.srcObject = stream;
       } catch {
@@ -58,7 +220,7 @@ export default function VitaSense() {
     })();
     return () => {
       streamRef.current?.getTracks().forEach((t) => t.stop());
-      esRef.current?.close();
+      esRef.current?.abort?.();
     };
   }, []);
 
@@ -76,6 +238,8 @@ export default function VitaSense() {
   const startSession = () => {
     setFaceAligned(false);
     setResults(null);
+    setPartialVitals({});
+    setShowRadar(false);
     setErrorMsg("");
     setAppState(STATES.ALIGNING);
   };
@@ -114,13 +278,9 @@ export default function VitaSense() {
     const formData = new FormData();
     formData.append("video", blob, "vitasense_capture.webm");
 
-    // Step 1: Upload video, get job_id back immediately
     let job_id;
     try {
-      const res = await fetch(`${API_BASE}/analyze`, {
-        method: "POST",
-        body: formData,
-      });
+      const res = await fetch(`${API_BASE}/analyze`, { method: "POST", body: formData });
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.detail || "Upload failed");
@@ -133,8 +293,6 @@ export default function VitaSense() {
       return;
     }
 
-    // Step 2: Connect to SSE via fetch + ReadableStream
-    // More reliable than EventSource which misfires onerror on keepalives
     setProcessingMsg("Starting MATLAB pipeline...");
 
     const abortCtrl = new AbortController();
@@ -145,9 +303,7 @@ export default function VitaSense() {
         signal: abortCtrl.signal,
       });
 
-      if (!sseRes.ok) {
-        throw new Error(`SSE connection failed: ${sseRes.status}`);
-      }
+      if (!sseRes.ok) throw new Error(`SSE connection failed: ${sseRes.status}`);
 
       const reader  = sseRes.body.getReader();
       const decoder = new TextDecoder();
@@ -158,13 +314,11 @@ export default function VitaSense() {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-
-        // SSE messages separated by \n\n
         const parts = buffer.split("\n\n");
         buffer = parts.pop();
 
         for (const part of parts) {
-          if (part.startsWith(":")) continue; // keepalive comment
+          if (part.startsWith(":")) continue;
 
           const dataLine = part.split("\n").find(l => l.startsWith("data:"));
           if (!dataLine) continue;
@@ -174,11 +328,26 @@ export default function VitaSense() {
 
             if (msg.type === "progress") {
               setProcessingMsg(msg.message);
+
+            } else if (msg.type === "vitals_partial") {
+              // Merge partial chunk into accumulated vitals and show radar
+              setPartialVitals(prev => {
+                const merged = { ...prev, ...msg };
+                delete merged.type;
+                return merged;
+              });
+              // First partial arriving → swap spinner for radar
+              setShowRadar(true);
+
             } else if (msg.type === "result") {
               abortCtrl.abort();
+              // Final result — merge with partials for completeness
+              setPartialVitals(prev => ({ ...prev, ...msg.data }));
               setResults(msg.data);
+              setShowRadar(true);
               setAppState(STATES.RESULTS);
               return;
+
             } else if (msg.type === "error") {
               abortCtrl.abort();
               setErrorMsg(msg.message || "Pipeline failed.");
@@ -198,10 +367,11 @@ export default function VitaSense() {
   };
 
   const reset = () => {
-    esRef.current?.abort?.();  // AbortController
-    esRef.current?.close?.();  // fallback if EventSource
+    esRef.current?.abort?.();
     setAppState(STATES.IDLE);
     setResults(null);
+    setPartialVitals({});
+    setShowRadar(false);
     setProgress(0);
     setTimeLeft(RECORD_SECONDS);
     setFaceAligned(false);
@@ -210,10 +380,15 @@ export default function VitaSense() {
   };
 
   const borderClass =
-    appState === STATES.RECORDING ? "border-recording"
-    : faceAligned                 ? "border-aligned"
+    appState === STATES.RECORDING  ? "border-recording"
+    : faceAligned                  ? "border-aligned"
     : appState === STATES.ALIGNING ? "border-aligning"
     : "border-idle";
+
+  // Vital cards use partialVitals during processing, results when done
+  const displayVitals = results ?? partialVitals;
+  const isActive = appState === STATES.RESULTS ||
+    (appState === STATES.PROCESSING && showRadar);
 
   return (
     <div className="vs-root">
@@ -241,12 +416,25 @@ export default function VitaSense() {
       </header>
 
       <main className="vs-main">
+
         {/* Left panel — HR + SpO2 */}
         <section className="vitals-section">
           <h2 className="vitals-heading">Cardiovascular</h2>
           <div className="vitals-grid">
-            <VitalCard label="Heart Rate" unit="bpm" value={results?.hr_bpm}    icon="♥" accent="#ff6b00" normal={[60,100]} limits={[40,200]} active={appState===STATES.RESULTS} />
-            <VitalCard label="SpO₂"       unit="%"   value={results?.spo2_pct}  icon="◉" accent="#00d4ff" normal={[95,100]} limits={[80,100]} active={appState===STATES.RESULTS} />
+            <VitalCard
+              label="Heart Rate" unit="bpm"
+              value={displayVitals?.hr_bpm}
+              icon="♥" accent="#ff6b00"
+              normal={[60, 100]} limits={[40, 200]}
+              active={isActive}
+            />
+            <VitalCard
+              label="SpO₂" unit="%"
+              value={displayVitals?.spo2_pct}
+              icon="◉" accent="#00d4ff"
+              normal={[95, 100]} limits={[80, 100]}
+              active={isActive}
+            />
           </div>
           {appState === STATES.IDLE && (
             <div className="instructions">
@@ -267,14 +455,30 @@ export default function VitaSense() {
           )}
         </section>
 
-        {/* Center — Camera */}
+        {/* Center — Camera / Radar */}
         <section className="camera-section">
           <div className={`camera-frame ${borderClass}`}>
             <div className="corner tl"/><div className="corner tr"/>
             <div className="corner bl"/><div className="corner br"/>
 
-            <video ref={videoRef} autoPlay playsInline muted className="camera-feed" />
+            {/* Camera feed — hidden once radar appears */}
+            <video
+              ref={videoRef}
+              autoPlay playsInline muted
+              className={`camera-feed ${showRadar ? "camera-fade-out" : ""}`}
+            />
 
+            {/* Radar — fades in when first partial arrives */}
+            {(showRadar || appState === STATES.RESULTS) && (
+              <div className="radar-overlay radar-fade-in">
+                <RadarChart vitals={partialVitals} />
+                {appState === STATES.PROCESSING && (
+                  <p className="radar-processing-label">{processingMsg}</p>
+                )}
+              </div>
+            )}
+
+            {/* Alignment overlay */}
             {(appState === STATES.IDLE || appState === STATES.ALIGNING) && (
               <div className="align-overlay">
                 <div className="face-guide">
@@ -288,6 +492,7 @@ export default function VitaSense() {
               </div>
             )}
 
+            {/* Recording HUD */}
             {appState === STATES.RECORDING && (
               <div className="recording-hud">
                 <div className="rec-badge"><span className="rec-dot" /> REC</div>
@@ -295,17 +500,11 @@ export default function VitaSense() {
               </div>
             )}
 
-            {appState === STATES.PROCESSING && (
+            {/* Spinner — only while processing AND radar not yet shown */}
+            {appState === STATES.PROCESSING && !showRadar && (
               <div className="processing-overlay">
                 <div className="spinner" />
                 <p className="processing-step">{processingMsg}</p>
-              </div>
-            )}
-
-            {appState === STATES.RESULTS && (
-              <div className="results-stamp">
-                <span className="stamp-icon">✓</span>
-                <span>Analysis Complete</span>
               </div>
             )}
           </div>
@@ -336,16 +535,33 @@ export default function VitaSense() {
         <section className="vitals-section">
           <h2 className="vitals-heading">Blood Pressure</h2>
           <div className="vitals-grid">
-            <VitalCard label="Systolic"  unit="mmHg" value={results?.sbp_mean != null ? Math.round(results.sbp_mean) : null} icon="↑" accent="#00ff88" normal={[90,120]} limits={[70,180]} active={appState===STATES.RESULTS} />
-            <VitalCard label="Diastolic" unit="mmHg" value={results?.dbp_mean != null ? Math.round(results.dbp_mean) : null} icon="↓" accent="#a78bfa" normal={[60,80]}  limits={[40,120]} active={appState===STATES.RESULTS} />
+            <VitalCard
+              label="Systolic" unit="mmHg"
+              value={displayVitals?.sbp_mean != null
+                ? Math.round(displayVitals.sbp_mean) : null}
+              icon="↑" accent="#00ff88"
+              normal={[90, 120]} limits={[70, 180]}
+              active={isActive}
+            />
+            <VitalCard
+              label="Diastolic" unit="mmHg"
+              value={displayVitals?.dbp_mean != null
+                ? Math.round(displayVitals.dbp_mean) : null}
+              icon="↓" accent="#a78bfa"
+              normal={[60, 80]} limits={[40, 120]}
+              active={isActive}
+            />
           </div>
           {appState === STATES.RESULTS && results?.sbp_std != null && (
             <div className="bp-detail">
               <span>Variability</span>
-              <span>±{Math.round(results.sbp_std)} / ±{Math.round(results.dbp_std)} mmHg</span>
+              <span>
+                ±{Math.round(results.sbp_std)} / ±{Math.round(results.dbp_std)} mmHg
+              </span>
             </div>
           )}
         </section>
+
       </main>
 
       <footer className="vs-footer">
@@ -356,15 +572,18 @@ export default function VitaSense() {
   );
 }
 
+// ── VitalCard ─────────────────────────────────────────────────────────────────
 function VitalCard({ label, unit, value, icon, accent, normal, limits, active }) {
-  // Outside physiological limits = show as invalid (—)
   const inRange  = limits == null || (value != null && value >= limits[0] && value <= limits[1]);
   const display  = inRange ? value : null;
   const isNormal = display != null && display >= normal[0] && display <= normal[1];
   const isHigh   = display != null && display > normal[1];
 
   return (
-    <div className={`vital-card ${active ? "vital-active" : ""}`} style={{ "--accent": accent }}>
+    <div
+      className={`vital-card ${active && display != null ? "vital-active" : ""}`}
+      style={{ "--accent": accent }}
+    >
       <div className="vital-icon">{icon}</div>
       <div className="vital-body">
         <span className="vital-label">{label}</span>
@@ -383,12 +602,17 @@ function VitalCard({ label, unit, value, icon, accent, normal, limits, active })
           )}
         </div>
         {active && display != null && (
-          <span className={`vital-status ${isNormal ? "status-normal" : isHigh ? "status-high" : "status-low"}`}>
+          <span className={`vital-status ${
+            isNormal ? "status-normal" : isHigh ? "status-high" : "status-low"
+          }`}>
             {isNormal ? "Normal" : isHigh ? "Elevated" : "Low"}
           </span>
         )}
       </div>
-      <div className="vital-ring" style={{ borderColor: active && value != null ? accent : "transparent" }} />
+      <div
+        className="vital-ring"
+        style={{ borderColor: active && value != null ? accent : "transparent" }}
+      />
     </div>
   );
 }

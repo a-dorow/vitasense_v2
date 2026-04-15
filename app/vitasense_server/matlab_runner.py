@@ -12,7 +12,6 @@ Machine-specific paths loaded from local_config.py (gitignored).
 """
 
 import subprocess
-import glob
 import os
 import threading
 import time
@@ -41,12 +40,11 @@ OUTPUT_FIGS = _REPO / "outputs" / "figs"
 OUTPUT_LOGS = _REPO / "outputs" / "logs"
 
 # ── MATLAB Engine state ───────────────────────────────────────────────────────
-_engine       = None          # matlab.engine.MatlabEngine instance
-_engine_ready = False         # True once addpath() has run
+_engine       = None
+_engine_ready = False
 _engine_lock  = threading.Lock()
-_engine_error = None          # set if engine failed to start
+_engine_error = None
 
-# Pre-import matlab.engine at module load time so it's available in threads
 _matlab_engine_module = None
 try:
     import matlab.engine as _matlab_engine_module
@@ -57,10 +55,7 @@ except ImportError as e:
 
 
 def start_engine_async():
-    """
-    Called once at server startup in a background thread.
-    Starts the MATLAB engine and runs addpath so it's ready for scans.
-    """
+    """Called once at server startup in a background thread."""
     t = threading.Thread(target=_init_engine, daemon=True)
     t.start()
     print("[matlab_runner] MATLAB engine warming up in background...")
@@ -70,39 +65,26 @@ def _init_engine():
     global _engine, _engine_ready, _engine_error
     import traceback
     try:
-        print("[matlab_runner] Attempting matlab.engine import...")
         if _matlab_engine_module is None:
             raise ImportError("matlab.engine was not available at module load time.")
-        print("[matlab_runner] Import OK. Calling start_matlab()...")
+        print("[matlab_runner] Calling start_matlab()...")
         eng = _matlab_engine_module.start_matlab()
-        print("[matlab_runner] start_matlab() returned. Adding paths...")
         eng.addpath(eng.genpath(str(_REPO)), nargout=0)
         print(f"[matlab_runner] MATLAB engine ready. Paths added from: {_REPO}")
         with _engine_lock:
             _engine       = eng
             _engine_ready = True
-
     except ImportError as e:
-        msg = (
-            f"[matlab_runner] matlab.engine not found: {e}\n"
-            "Install it with: cd 'C:\\Program Files\\MATLAB\\R2024a\\extern\\engines\\python' "
-            "&& python setup.py install\n"
-            "Falling back to -batch subprocess mode."
-        )
-        print(msg)
+        print(f"[matlab_runner] matlab.engine not found: {e}. Falling back to -batch.")
         with _engine_lock:
             _engine_error = f"matlab.engine not installed: {e}"
-
     except Exception as e:
-        print(f"[matlab_runner] Engine startup failed: {e}")
-        print(f"[matlab_runner] Traceback:\n{traceback.format_exc()}")
-        print("[matlab_runner] Falling back to -batch subprocess mode.")
+        print(f"[matlab_runner] Engine startup failed: {e}\n{traceback.format_exc()}")
         with _engine_lock:
             _engine_error = str(e)
 
 
 def engine_status() -> dict:
-    """Returns engine readiness for the /health endpoint."""
     with _engine_lock:
         return {
             "ready": _engine_ready,
@@ -116,10 +98,16 @@ def run_pipeline(
     video_path: str,
     timeout: int = 300,
     progress_callback: Optional[Callable[[str], None]] = None,
+    partial_callback: Optional[Callable[[dict], None]] = None,
 ) -> dict:
     """
     Runs run_pipeline_kiosk on video_path.
-    Uses MATLAB engine if ready, otherwise falls back to -batch subprocess.
+
+    partial_callback(dict) is called as soon as MATLAB returns with
+    { hr_bpm, spo2_pct } so the server can stream a partial SSE event
+    before BP is computed.
+
+    Returns full dict: { hr_bpm, spo2_pct, ippg_signal, fs_hz }
     """
     video_path = str(Path(video_path).resolve())
 
@@ -134,10 +122,10 @@ def run_pipeline(
 
     if use_engine:
         print(f"[matlab_runner] Using MATLAB engine for: {video_path}")
-        return _run_via_engine(video_path, timeout, progress_callback)
+        return _run_via_engine(video_path, timeout, progress_callback, partial_callback)
     else:
         print(f"[matlab_runner] Using -batch subprocess for: {video_path}")
-        return _run_via_subprocess(video_path, timeout, progress_callback)
+        return _run_via_subprocess(video_path, timeout, progress_callback, partial_callback)
 
 
 # ── Engine mode ───────────────────────────────────────────────────────────────
@@ -145,11 +133,8 @@ def _run_via_engine(
     video_path: str,
     timeout: int,
     progress_callback: Optional[Callable[[str], None]],
+    partial_callback: Optional[Callable[[dict], None]],
 ) -> dict:
-    """
-    Calls run_pipeline_kiosk directly via the live MATLAB engine.
-    Since the engine doesn't stream stdout, we emit synthetic progress events.
-    """
     import matlab
 
     steps = [
@@ -161,9 +146,8 @@ def _run_via_engine(
         "Finalising results...",
     ]
 
-    # Emit progress steps on a timer while MATLAB runs
-    step_idx   = [0]
-    step_done  = [False]
+    step_idx  = [0]
+    step_done = [False]
 
     def _progress_ticker():
         while not step_done[0]:
@@ -171,7 +155,7 @@ def _run_via_engine(
                 if progress_callback:
                     progress_callback(steps[step_idx[0]])
                 step_idx[0] += 1
-            time.sleep(8)   # emit a new step ~every 8s
+            time.sleep(8)
 
     ticker = threading.Thread(target=_progress_ticker, daemon=True)
     ticker.start()
@@ -180,14 +164,22 @@ def _run_via_engine(
         with _engine_lock:
             eng = _engine
 
-        hr_result, spo2_result = eng.run_pipeline_kiosk(
+        # run_pipeline_kiosk now returns 4 values: hr, spo2, ippg_signal, Fs
+        hr_result, spo2_result, ippg_matlab, fs_result = eng.run_pipeline_kiosk(
             video_path,
-            'writeJson', True,
-            nargout=2,
+            'writeJson', False,
+            nargout=4,
         )
 
         hr_bpm   = float(hr_result)   if hr_result   is not None else None
         spo2_pct = float(spo2_result) if spo2_result is not None else None
+        fs_hz    = float(fs_result)   if fs_result   is not None else 30.0
+
+        # Convert matlab double array → Python list
+        try:
+            ippg_signal = list(ippg_matlab[0]) if ippg_matlab is not None else []
+        except Exception:
+            ippg_signal = []
 
     finally:
         step_done[0] = True
@@ -195,14 +187,18 @@ def _run_via_engine(
     if progress_callback:
         progress_callback("Finalising results...")
 
-    fig_path = _find_best_fig()
+    # Fire partial callback immediately — BP hasn't run yet
+    if partial_callback:
+        partial_callback({"hr_bpm": hr_bpm, "spo2_pct": spo2_pct})
 
-    print(f"[matlab_runner] Engine result — hr={hr_bpm}, spo2={spo2_pct}, fig={fig_path}")
+    print(f"[matlab_runner] Engine result — hr={hr_bpm}, spo2={spo2_pct}, "
+          f"signal_len={len(ippg_signal)}, fs={fs_hz}")
 
     return {
-        "hr_bpm":   hr_bpm,
-        "spo2_pct": spo2_pct,
-        "fig_path": fig_path,
+        "hr_bpm":      hr_bpm,
+        "spo2_pct":    spo2_pct,
+        "ippg_signal": ippg_signal,
+        "fs_hz":       fs_hz,
     }
 
 
@@ -211,6 +207,7 @@ def _run_via_subprocess(
     video_path: str,
     timeout: int,
     progress_callback: Optional[Callable[[str], None]],
+    partial_callback: Optional[Callable[[dict], None]],
 ) -> dict:
 
     print(f"[matlab_runner] ── Starting -batch pipeline ──")
@@ -221,18 +218,17 @@ def _run_via_subprocess(
     if not Path(MATLAB_EXE).is_file():
         raise RuntimeError(f"MATLAB executable not found: {MATLAB_EXE}")
 
+    # Signal is printed as a comma-separated row on one line
     matlab_cmd = (
         f"addpath(genpath('{MATLAB_ROOT}')); "
         f"try, "
-        f"  [hr, spo2] = run_pipeline_kiosk("
-        f"    '{video_path}', "
-        f"    'writeJson', true"
-        f"  ); "
+        f"  [hr, spo2, sig, fs] = run_pipeline_kiosk('{video_path}', 'writeJson', false); "
         f"  fprintf('VITASENSE_HR=%.6f\\n',   hr); "
         f"  fprintf('VITASENSE_SPO2=%.6f\\n', spo2); "
+        f"  fprintf('VITASENSE_FS=%.6f\\n',   fs); "
+        f"  fprintf('VITASENSE_SIGNAL=%s\\n', num2str(sig, '%.6f,')); "
         f"catch ME, "
         f"  fprintf('VITASENSE_ERROR=%s\\n', ME.message); "
-        f"  fprintf('VITASENSE_STACK=%s\\n', ME.getReport('extended')); "
         f"end; "
         f"exit;"
     )
@@ -246,6 +242,8 @@ def _run_via_subprocess(
     )
 
     all_output = []
+    partial_fired = False
+
     try:
         for line in proc.stdout:
             line = line.rstrip()
@@ -257,37 +255,52 @@ def _run_via_subprocess(
                 if progress_callback:
                     progress_callback(msg)
 
+            # Fire partial callback as soon as we see HR + SPO2 lines
+            if not partial_fired and "VITASENSE_HR=" in "\n".join(all_output) \
+                    and "VITASENSE_SPO2=" in "\n".join(all_output):
+                hr_partial   = _parse_float("\n".join(all_output), "VITASENSE_HR")
+                spo2_partial = _parse_float("\n".join(all_output), "VITASENSE_SPO2")
+                if hr_partial is not None and spo2_partial is not None:
+                    if partial_callback:
+                        partial_callback({"hr_bpm": hr_partial, "spo2_pct": spo2_partial})
+                    partial_fired = True
+
         proc.wait(timeout=timeout)
 
     except subprocess.TimeoutExpired:
         proc.kill()
-        print(f"[matlab_runner] ERROR: MATLAB timed out after {timeout}s")
         raise
 
     stdout = "\n".join(all_output)
-    print(f"[matlab_runner] ── MATLAB finished (return code {proc.returncode}) ──")
 
     error = _parse_str(stdout, "VITASENSE_ERROR")
     if error:
-        print(f"[matlab_runner] VITASENSE_ERROR: {error}")
         raise RuntimeError(f"MATLAB pipeline error: {error}")
 
     hr_bpm   = _parse_float(stdout, "VITASENSE_HR")
     spo2_pct = _parse_float(stdout, "VITASENSE_SPO2")
-    fig_path = _find_best_fig()
+    fs_hz    = _parse_float(stdout, "VITASENSE_FS") or 30.0
 
-    print(f"[matlab_runner] hr_bpm={hr_bpm}, spo2_pct={spo2_pct}, fig_path={fig_path}")
+    # Parse comma-separated signal
+    ippg_signal = []
+    sig_line = _parse_str(stdout, "VITASENSE_SIGNAL")
+    if sig_line:
+        try:
+            ippg_signal = [float(x) for x in sig_line.split(",") if x.strip()]
+        except Exception:
+            ippg_signal = []
 
-    if hr_bpm   is None: print(f"[matlab_runner] WARNING: VITASENSE_HR not found.")
-    if spo2_pct is None: print(f"[matlab_runner] WARNING: VITASENSE_SPO2 not found.")
-    if fig_path is None:
-        all_figs = glob.glob(str(_REPO / "**" / "*.fig"), recursive=True)
-        print(f"[matlab_runner] WARNING: No .fig found. All figs: {all_figs}")
+    if not partial_fired and partial_callback:
+        partial_callback({"hr_bpm": hr_bpm, "spo2_pct": spo2_pct})
+
+    print(f"[matlab_runner] hr_bpm={hr_bpm}, spo2_pct={spo2_pct}, "
+          f"signal_len={len(ippg_signal)}, fs={fs_hz}")
 
     return {
-        "hr_bpm":   hr_bpm,
-        "spo2_pct": spo2_pct,
-        "fig_path": fig_path,
+        "hr_bpm":      hr_bpm,
+        "spo2_pct":    spo2_pct,
+        "ippg_signal": ippg_signal,
+        "fs_hz":       fs_hz,
     }
 
 
@@ -306,26 +319,4 @@ def _parse_str(text: str, key: str) -> Optional[str]:
     for line in text.splitlines():
         if line.strip().startswith(f"{key}="):
             return line.split("=", 1)[1].strip()
-    return None
-
-
-def _find_best_fig() -> Optional[str]:
-    search_patterns = [
-        str(OUTPUT_FIGS / "**" / "*.fig"),
-        str(_REPO / "**" / "*CHROM*iPPG*.fig"),
-        str(_REPO / "**" / "*.fig"),
-    ]
-    for pattern in search_patterns:
-        figs = glob.glob(pattern, recursive=True)
-        if not figs:
-            continue
-        chrom_ippg = [f for f in figs
-                      if "chrom" in os.path.basename(f).lower()
-                      and "ippg"  in os.path.basename(f).lower()
-                      and "psd"   not in os.path.basename(f).lower()]
-        candidates = chrom_ippg if chrom_ippg else figs
-        subj1 = [f for f in candidates if "subject_1" in os.path.basename(f).lower()]
-        if subj1:
-            candidates = subj1
-        return max(candidates, key=os.path.getmtime)
     return None

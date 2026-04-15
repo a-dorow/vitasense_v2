@@ -51,7 +51,7 @@ function rawColorSignal = extract_color_channels_from_video_KLT_v2(video_input, 
         faceDetector.MergeThreshold = 2;    % more lenient merging at low-res
         maxWaitSec = 10;                    % wait longer at low-res
     else
-        maxWaitSec = 5;                     % DEFAULT: wait up to 5 seconds
+        maxWaitSec = 1;                     % DEFAULT: wait up to 5 seconds
     end
 
     %% ---------- Wait until a valid face is detected ----------

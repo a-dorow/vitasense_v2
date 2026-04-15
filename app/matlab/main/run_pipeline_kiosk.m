@@ -1,7 +1,12 @@
-function [hr_bpm, spo2_pct] = run_pipeline_kiosk(video_path, varargin)
+function [hr_bpm, spo2_pct, ippg_signal, Fs] = run_pipeline_kiosk(video_path, varargin)
 % run_pipeline_kiosk
 % Wrapper for iPPG_pipeline_kiosk — called by vitasense_server matlab_runner.py
-% Identical interface to run_pipeline_on_video but uses kiosk pipeline.
+%
+% Outputs:
+%   hr_bpm      : heart rate BPM
+%   spo2_pct    : SpO2 percentage
+%   ippg_signal : CHROM iPPG signal vector (row) — passed to BP server
+%   Fs          : sampling rate Hz — passed to BP server
 %
 % Optional args (name/value):
 %   'writeJson' (logical) default false
@@ -16,7 +21,6 @@ function [hr_bpm, spo2_pct] = run_pipeline_kiosk(video_path, varargin)
     jsonPath  = string(p.Results.jsonPath);
 
     % Resolve repo root from this file's location
-    % .m files live at repo root so this_dir IS the repo root
     this_file    = mfilename('fullpath');
     this_dir     = fileparts(this_file);
     repo_root    = this_dir;
@@ -28,7 +32,7 @@ function [hr_bpm, spo2_pct] = run_pipeline_kiosk(video_path, varargin)
     if ~isfolder(plot_path),    mkdir(plot_path);    end
     if ~isfolder(trace_folder), mkdir(trace_folder); end
 
-    [hr_bpm, spo2_pct] = iPPG_pipeline_kiosk(video_path, plot_path, trace_folder, repo_root);
+    [hr_bpm, spo2_pct, ippg_signal, Fs] = iPPG_pipeline_kiosk(video_path, plot_path, trace_folder, repo_root);
 
     if writeJson
         if strlength(jsonPath) == 0

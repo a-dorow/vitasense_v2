@@ -1,11 +1,19 @@
-function [hr_bpm, spo2_pct] = iPPG_pipeline_kiosk(video_path, plot_path, trace_folder, main_path)
+function [hr_bpm, spo2_pct, ippg_signal, Fs] = iPPG_pipeline_kiosk(video_path, plot_path, trace_folder, main_path)
 % iPPG_pipeline_kiosk
 % Streamlined CHROM-only pipeline for the VitaSense kiosk.
 % Computes HR directly from Welch PSD — no batch FFT post-processing,
-% no folder sorting, no struct2table. Fast single-subject path only.
+% no folder sorting, no struct2table, no .fig file I/O. Fast single-subject path only.
+%
+% Outputs:
+%   hr_bpm      : heart rate in BPM (double)
+%   spo2_pct    : SpO2 percentage (double)
+%   ippg_signal : CHROM iPPG signal vector (double row vector) — for BP server
+%   Fs          : sampling rate Hz (double) — for BP server
 
-hr_bpm   = NaN;
-spo2_pct = NaN;
+hr_bpm      = NaN;
+spo2_pct    = NaN;
+ippg_signal = [];
+Fs          = 30;
 
 if ~exist(plot_path,   'dir'), mkdir(plot_path);   end
 if ~exist(trace_folder,'dir'), mkdir(trace_folder); end
@@ -14,7 +22,6 @@ if ~exist(trace_folder,'dir'), mkdir(trace_folder); end
 fprintf('VITASENSE_PROGRESS=Configuring pipeline...\n'); drawnow;
 
 videoSettings = configure_video_settings();
-plotSettings  = configure_plot_settings();
 
 try
     vr = VideoReader(video_path);
@@ -26,9 +33,6 @@ end
 
 ippgSettings = configure_ippg_settings(Fs);
 ippgSettings.extractionMethod = select_extraction_method('CHROM', ippgSettings);
-
-subject_name   = extract_subject_from_path(video_path);
-subject_folder = create_sub_folder(plot_path, subject_name);
 
 %% 2. Extract RGB signal
 fprintf('VITASENSE_PROGRESS=Extracting facial signal...\n'); drawnow;
@@ -95,24 +99,10 @@ catch
     iPPG = rawRGB(2,:);  % GREEN fallback
 end
 
-%% 5. Save .fig for bp_server
-fprintf('VITASENSE_PROGRESS=Saving signal...\n'); drawnow;
+% Expose signal for BP server — ensure row vector of doubles
+ippg_signal = double(iPPG(:).');
 
-fig = figure('Visible','off');
-try
-    t = (1:length(iPPG)) / Fs;
-    plot(t, iPPG, 'LineWidth', plotSettings.lineWidth);
-    set(gca,'FontSize',plotSettings.fontSize,'FontName',plotSettings.fontType);
-    xlabel('Time [s]'); ylabel('iPPG [a.u.]');
-    title(sprintf('%s | CHROM | SpO2 = %.2f%%', subject_name, SpO2_mean));
-    axis tight;
-    out_name = sprintf('%s_CHROM_iPPG.fig', subject_name);
-    saveas(fig, fullfile(subject_folder, out_name));
-catch
-end
-close(fig);
-
-%% 6. Compute HR directly via Welch PSD — no batch post-processing
+%% 5. Compute HR directly via Welch PSD
 fprintf('VITASENSE_PROGRESS=Computing heart rate...\n'); drawnow;
 
 hr_bpm = local_welch_hr(iPPG, Fs);
@@ -127,7 +117,6 @@ end
 % ── Inline Welch HR (no file I/O, no struct2table) ───────────────────────────
 function hr_bpm = local_welch_hr(signal, fs)
 % Computes HR from iPPG signal using windowed Welch PSD.
-% Mirrors the logic in match_and_process_fft_v4 but inline — no file ops.
 
     hr_bpm = NaN;
 
@@ -193,8 +182,8 @@ function hr_bpm = local_welch_hr(signal, fs)
         hr = peakF * 60;
         if hr < fMin*60 || hr > fMax*60, continue; end
 
-        hrs(end+1,1) = hr;      %#ok<AGROW>
-        qs(end+1,1)  = peakRatio; %#ok<AGROW>
+        hrs(end+1,1) = hr;      
+        qs(end+1,1)  = peakRatio; 
     end
 
     if ~isempty(hrs)
