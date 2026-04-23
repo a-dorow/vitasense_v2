@@ -38,71 +38,85 @@ function radarPoints(values, cx, cy, maxR, axes) {
 }
 
 const RADAR_AXES = [
-  { key: "hr_bpm",   label: "HR",   min: 40,  max: 180, color: "#ff6b00" },
-  { key: "spo2_pct", label: "SpO₂", min: 85,  max: 100, color: "#00d4ff" },
-  { key: "sbp_mean", label: "SBP",  min: 70,  max: 180, color: "#00ff88" },
-  { key: "dbp_mean", label: "DBP",  min: 40,  max: 120, color: "#a78bfa" },
+  { key: "hr_bpm",   label: "HR",   min: 40,  max: 180, color: "#ff6b00",
+    unit: "bpm",   normalRange: "60–100",  description: "Heart Rate" },
+  { key: "spo2_pct", label: "SpO₂", min: 85,  max: 100, color: "#00d4ff",
+    unit: "%",    normalRange: "95–100",  description: "Blood Oxygen" },
+  { key: "sbp_mean", label: "SBP",  min: 70,  max: 180, color: "#00ff88",
+    unit: "mmHg", normalRange: "90–120",  description: "Systolic BP" },
+  { key: "dbp_mean", label: "DBP",  min: 40,  max: 120, color: "#a78bfa",
+    unit: "mmHg", normalRange: "60–80",   description: "Diastolic BP" },
 ];
 
 // ── Radar SVG component ───────────────────────────────────────────────────────
 function RadarChart({ vitals }) {
-  const cx = 160, cy = 160, maxR = 110;
+  const cx = 230, cy = 230, maxR = 160;
   const n = RADAR_AXES.length;
 
   const values = RADAR_AXES.map(({ key, min, max }) =>
     norm(vitals[key], min, max)
   );
 
-  // Grid rings
   const rings = [0.25, 0.5, 0.75, 1.0];
 
-  // Spoke endpoints
+  // Normal range ring — maps normal midpoint to radar
+  const normalValues = RADAR_AXES.map(({ min, max, normalRange }) => {
+    const [lo, hi] = normalRange.split("–").map(Number);
+    const mid = (lo + hi) / 2;
+    return norm(mid, min, max);
+  });
+
   const spokes = RADAR_AXES.map((_, i) => {
     const angle = (360 / n) * i;
     return polar(cx, cy, maxR, angle);
   });
 
-  // Filled polygon
-  const filledPts = radarPoints(values, cx, cy, maxR, RADAR_AXES);
+  const filledPts  = radarPoints(values, cx, cy, maxR, RADAR_AXES);
+  const normalPts  = radarPoints(normalValues, cx, cy, maxR, RADAR_AXES);
 
-  // Label positions (slightly outside maxR)
   const labelPts = RADAR_AXES.map((axis, i) => {
     const angle = (360 / n) * i;
-    const [lx, ly] = polar(cx, cy, maxR + 26, angle);
+    const [lx, ly] = polar(cx, cy, maxR + 42, angle);
     return { ...axis, lx, ly };
   });
 
   return (
     <svg
-      viewBox="0 0 320 320"
-      width="320"
-      height="320"
+      viewBox="0 0 460 460"
+      width="460"
+      height="460"
       className="radar-svg"
     >
       {/* Grid rings */}
       {rings.map((r, ri) => (
         <polygon
           key={ri}
-          points={radarPoints(
-            Array(n).fill(r),
-            cx, cy, maxR, RADAR_AXES
-          )}
+          points={radarPoints(Array(n).fill(r), cx, cy, maxR, RADAR_AXES)}
           fill="none"
           stroke="#00d4ff"
-          strokeWidth="0.8"
-          opacity="0.2"
+          strokeWidth="1.2"
+          opacity={ri === rings.length - 1 ? 0.6 : 0.25}
         />
       ))}
+
+      {/* Normal range reference polygon */}
+      <polygon
+        points={normalPts}
+        fill="#00ff8815"
+        stroke="#00ff88"
+        strokeWidth="1.5"
+        strokeDasharray="6 4"
+        opacity="0.7"
+      />
 
       {/* Spokes */}
       {spokes.map(([sx, sy], i) => (
         <line
           key={i}
-          x1={cx} y1={cy}
-          x2={sx} y2={sy}
+          x1={cx} y1={cy} x2={sx} y2={sy}
           stroke="#ff6b00"
-          strokeWidth="1"
-          opacity="0.5"
+          strokeWidth="1.5"
+          opacity="0.8"
         />
       ))}
 
@@ -110,9 +124,9 @@ function RadarChart({ vitals }) {
       <polygon
         points={filledPts}
         fill="#00ff88"
-        fillOpacity="0.12"
+        fillOpacity="0.28"
         stroke="#00d4ff"
-        strokeWidth="2"
+        strokeWidth="3"
         strokeLinejoin="round"
         className="radar-fill"
       />
@@ -125,41 +139,43 @@ function RadarChart({ vitals }) {
         return (
           <circle
             key={i}
-            cx={dx} cy={dy} r="5"
+            cx={dx} cy={dy} r="8"
             fill={color}
-            style={{ filter: `drop-shadow(0 0 6px ${color})` }}
+            style={{ filter: `drop-shadow(0 0 10px ${color})` }}
             className="radar-dot"
           />
         );
       })}
 
       {/* Labels */}
-      {labelPts.map(({ label, color, lx, ly, key, min, max }, i) => {
+      {labelPts.map(({ label, color, lx, ly, key }, i) => {
         const val = vitals[key];
         const hasVal = val != null && isFinite(val);
         return (
           <g key={i}>
             <text
-              x={lx} y={ly - 6}
+              x={lx} y={ly - 10}
               textAnchor="middle"
               dominantBaseline="middle"
               fill={color}
-              fontSize="13"
+              fontSize="18"
               fontFamily="DM Mono, monospace"
               fontWeight="500"
-              style={{ filter: `drop-shadow(0 0 6px ${color})` }}
+              style={{ filter: `drop-shadow(0 0 10px ${color})` }}
             >
               {label}
             </text>
             {hasVal && (
               <text
-                x={lx} y={ly + 10}
+                x={lx} y={ly + 14}
                 textAnchor="middle"
                 dominantBaseline="middle"
                 fill="#f0f6ff"
-                fontSize="11"
+                fontSize="15"
                 fontFamily="DM Mono, monospace"
-                opacity="0.8"
+                fontWeight="400"
+                opacity="0.95"
+                style={{ filter: "drop-shadow(0 0 6px #ffffff55)" }}
               >
                 {Number.isInteger(val) ? val : val.toFixed(1)}
               </text>
@@ -169,8 +185,54 @@ function RadarChart({ vitals }) {
       })}
 
       {/* Center dot */}
-      <circle cx={cx} cy={cy} r="3" fill="#ff6b00" opacity="0.6" />
+      <circle cx={cx} cy={cy} r="4" fill="#ff6b00" opacity="0.8" />
+
+      {/* Normal range legend — top-left corner, away from all axis labels */}
+      <g>
+        <line x1="12" y1="18" x2="38" y2="18" stroke="#00ff88" strokeWidth="1.5"
+          strokeDasharray="4 3" opacity="0.75" />
+        <text x="44" y="18" dominantBaseline="middle" fill="#00ff88" fontSize="11"
+          fontFamily="DM Mono, monospace" opacity="0.75">normal range</text>
+      </g>
     </svg>
+  );
+}
+
+// ── Radar Legend component ────────────────────────────────────────────────────
+function RadarLegend({ vitals }) {
+  return (
+    <div className="radar-legend">
+      <p className="radar-legend-title">How to read this chart</p>
+      <p className="radar-legend-desc">
+        Each axis spans from its minimum (center) to maximum (outer edge).
+        The <span style={{ color: "#00ff88" }}>dashed green shape</span> shows
+        the normal range midpoint. Your results appear as the
+        <span style={{ color: "#00d4ff" }}> solid blue shape</span> — the closer
+        your result is to the outer edge on each axis, the higher that value is
+        relative to its scale.
+      </p>
+      <div className="radar-legend-rows">
+        {RADAR_AXES.map(({ key, label, color, unit, normalRange, description, min, max }) => {
+          const val = vitals?.[key];
+          const hasVal = val != null && isFinite(val);
+          const pct = hasVal ? Math.round(norm(val, min, max) * 100) : null;
+          return (
+            <div key={key} className="radar-legend-row">
+              <span className="radar-legend-dot" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
+              <span className="radar-legend-name" style={{ color }}>{label}</span>
+              <span className="radar-legend-full">{description}</span>
+              <span className="radar-legend-normal">normal: {normalRange} {unit}</span>
+              {hasVal && (
+                <span className="radar-legend-val">
+                  {Number.isInteger(val) ? val : val.toFixed(1)} {unit}
+                  <span className="radar-legend-pct"> ({pct}% of scale)</span>
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -188,10 +250,11 @@ export default function VitaSense() {
   const [timeLeft,      setTimeLeft]      = useState(RECORD_SECONDS);
   const [processingMsg, setProcessingMsg] = useState("Starting pipeline...");
   const [results,       setResults]       = useState(null);
-  const [partialVitals, setPartialVitals] = useState({});  // accumulates as partials arrive
+  const [partialVitals, setPartialVitals] = useState({});
   const [showRadar,     setShowRadar]     = useState(false);
   const [errorMsg,      setErrorMsg]      = useState("");
   const [faceAligned,   setFaceAligned]   = useState(false);
+  const [showLegend,    setShowLegend]    = useState(false);
 
   // Start webcam on mount
   useEffect(() => {
@@ -240,6 +303,7 @@ export default function VitaSense() {
     setResults(null);
     setPartialVitals({});
     setShowRadar(false);
+    setShowLegend(false);
     setErrorMsg("");
     setAppState(STATES.ALIGNING);
   };
@@ -330,18 +394,15 @@ export default function VitaSense() {
               setProcessingMsg(msg.message);
 
             } else if (msg.type === "vitals_partial") {
-              // Merge partial chunk into accumulated vitals and show radar
               setPartialVitals(prev => {
                 const merged = { ...prev, ...msg };
                 delete merged.type;
                 return merged;
               });
-              // First partial arriving → swap spinner for radar
               setShowRadar(true);
 
             } else if (msg.type === "result") {
               abortCtrl.abort();
-              // Final result — merge with partials for completeness
               setPartialVitals(prev => ({ ...prev, ...msg.data }));
               setResults(msg.data);
               setShowRadar(true);
@@ -366,17 +427,24 @@ export default function VitaSense() {
     }
   };
 
+  // ── FIX: re-attach camera stream on reset ──────────────────────────────────
   const reset = () => {
     esRef.current?.abort?.();
     setAppState(STATES.IDLE);
     setResults(null);
     setPartialVitals({});
     setShowRadar(false);
+    setShowLegend(false);
     setProgress(0);
     setTimeLeft(RECORD_SECONDS);
     setFaceAligned(false);
     setErrorMsg("");
     setProcessingMsg("Starting pipeline...");
+
+    // Re-attach the live camera stream to the video element
+    if (videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+    }
   };
 
   const borderClass =
@@ -385,7 +453,6 @@ export default function VitaSense() {
     : appState === STATES.ALIGNING ? "border-aligning"
     : "border-idle";
 
-  // Vital cards use partialVitals during processing, results when done
   const displayVitals = results ?? partialVitals;
   const isActive = appState === STATES.RESULTS ||
     (appState === STATES.PROCESSING && showRadar);
@@ -523,12 +590,25 @@ export default function VitaSense() {
               </button>
             )}
             {appState === STATES.RESULTS && (
-              <button className="btn-secondary" onClick={reset}>New Scan</button>
+              <>
+                <button className="btn-secondary" onClick={reset}>New Scan</button>
+                <button
+                  className="btn-legend"
+                  onClick={() => setShowLegend(v => !v)}
+                >
+                  {showLegend ? "Hide chart guide" : "How to read this chart ↗"}
+                </button>
+              </>
             )}
             {appState === STATES.ERROR && (
               <p className="error-msg">{errorMsg}</p>
             )}
           </div>
+
+          {/* Radar legend — shown inline below the camera frame */}
+          {showLegend && appState === STATES.RESULTS && (
+            <RadarLegend vitals={displayVitals} />
+          )}
         </section>
 
         {/* Right panel — Blood Pressure */}

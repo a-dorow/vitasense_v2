@@ -156,6 +156,8 @@ html, body, #root {
   padding: 20px 28px;
   overflow: hidden;
   align-items: start;
+  /* allow center column to scroll independently */
+  min-height: 0;
 }
 
 /* ---- Vitals panels (left and right) ---- */
@@ -197,8 +199,7 @@ html, body, #root {
 
 .vital-card.vital-active {
   border-color: var(--accent);
-  box-shadow: 0 0 28px color-mix(in srgb, var(--accent) 25%, transparent),
-              inset 0 0 20px color-mix(in srgb, var(--accent) 5%, transparent);
+  box-shadow: 0 0 28px var(--accent), 0 0 4px var(--accent);
 }
 
 .vital-icon {
@@ -221,7 +222,7 @@ html, body, #root {
 .vital-label {
   font-size: 15px;
   font-family: var(--font-mono);
-  color: var(--text-secondary);
+  color: #ffffff;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -234,11 +235,11 @@ html, body, #root {
 
 .vital-number {
   font-family: var(--font-mono);
-  font-size: 68px;
+  font-size: 80px;
   font-weight: 500;
-  color: var(--accent);
+  color: #ffffff;
   line-height: 1;
-  text-shadow: 0 0 24px var(--accent), 0 0 48px color-mix(in srgb, var(--accent) 40%, transparent);
+  text-shadow: 0 0 24px var(--accent), 0 0 48px var(--accent);
   animation: count-in 0.6s ease;
 }
 
@@ -250,13 +251,13 @@ html, body, #root {
 .vital-unit {
   font-family: var(--font-mono);
   font-size: 20px;
-  color: var(--text-secondary);
+  color: #ffffff;
   letter-spacing: 0.04em;
 }
 
 .vital-placeholder {
   font-family: var(--font-mono);
-  font-size: 68px;
+  font-size: 80px;
   color: var(--text-dim);
   line-height: 1;
 }
@@ -305,12 +306,27 @@ html, body, #root {
   flex-direction: column;
   gap: 14px;
   align-items: center;
+  overflow-y: auto;
+  max-height: 100%;
+  padding-bottom: 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-bright) transparent;
+}
+.camera-section::-webkit-scrollbar {
+  width: 4px;
+}
+.camera-section::-webkit-scrollbar-track {
+  background: transparent;
+}
+.camera-section::-webkit-scrollbar-thumb {
+  background: var(--border-bright);
+  border-radius: 2px;
 }
 
 .camera-frame {
   position: relative;
-  width: 480px;
-  height: 360px;
+  width: 560px;
+  height: 480px;
   border-radius: var(--radius);
   overflow: hidden;
   border: 2px solid var(--border);
@@ -403,8 +419,8 @@ html, body, #root {
 }
 
 @keyframes dot-pulse {
-  0%, 100% { r: 5; opacity: 1; }
-  50%       { r: 7; opacity: 0.7; }
+  0%, 100% { r: 8; opacity: 1; }
+  50%       { r: 10; opacity: 0.7; }
 }
 
 /* Polygon shimmer */
@@ -413,8 +429,8 @@ html, body, #root {
 }
 
 @keyframes fill-shimmer {
-  0%, 100% { fill-opacity: 0.12; }
-  50%       { fill-opacity: 0.22; }
+  0%, 100% { fill-opacity: 0.28; }
+  50%       { fill-opacity: 0.40; }
 }
 
 /* Processing label inside radar */
@@ -519,7 +535,7 @@ html, body, #root {
 
 /* Progress bar */
 .progress-track {
-  position: relative; height: 6px; width: 480px;
+  position: relative; height: 6px; width: 560px;
   background: var(--navy-700); border-radius: 3px; overflow: hidden;
 }
 .progress-fill {
@@ -538,7 +554,7 @@ html, body, #root {
 /* CTA */
 .cta-row {
   display: flex; flex-direction: column;
-  align-items: center; gap: 10px; width: 480px;
+  align-items: center; gap: 10px; width: 560px;
 }
 
 .btn-primary {
@@ -639,4 +655,120 @@ html, body, #root {
   .camera-frame { width: 100%; height: 300px; }
   .progress-track, .cta-row { width: 100%; }
   html, body, #root { overflow: auto; }
+}
+/* ---- Legend toggle button ---- */
+.btn-legend {
+  width: 100%;
+  padding: 10px 24px;
+  background: transparent;
+  color: var(--neon-blue);
+  border: 1px dashed var(--neon-blue-dim);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.btn-legend:hover {
+  background: var(--neon-blue-dim);
+  border-color: var(--neon-blue);
+  color: var(--text-primary);
+}
+
+/* ---- Radar legend panel ---- */
+.radar-legend {
+  width: 560px;
+  background: var(--navy-800);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  margin-top: 4px;
+  animation: count-in 0.25s ease;
+  flex-shrink: 0;
+}
+
+.radar-legend-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.radar-legend-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 14px;
+}
+
+.radar-legend-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.radar-legend-row {
+  display: grid;
+  grid-template-columns: 10px 52px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.radar-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.radar-legend-name {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.radar-legend-full {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.radar-legend-normal {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.radar-legend-val {
+  grid-column: 2 / -1;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  padding-left: 4px;
+}
+
+.radar-legend-pct {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+/* Normal range dashed ring label */
+.radar-legend-ref {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+.radar-legend-ref-line {
+  width: 28px;
+  height: 0;
+  border-top: 2px dashed #00ff88;
+  opacity: 0.7;
 }
