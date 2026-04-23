@@ -18,6 +18,10 @@ SSE event types:
 
 Run from app/vitasense_server/:
   uvicorn vitasense_server:app --host 0.0.0.0 --port 6767 --reload
+
+Demo mode (replaces out-of-range vitals with normal values for PoC demos):
+  Windows:   set DEMO=1 && uvicorn vitasense_server:app --host 0.0.0.0 --port 6767 --reload
+  Mac/Linux: DEMO=1 uvicorn vitasense_server:app --host 0.0.0.0 --port 6767 --reload
 ────────────────────────────────────────────────────────────────
 """
 
@@ -28,6 +32,7 @@ import tempfile
 import subprocess
 import threading
 import json
+import random
 from pathlib import Path
 from subprocess import TimeoutExpired
 from concurrent.futures import ThreadPoolExecutor
@@ -66,6 +71,14 @@ except (ImportError, AttributeError):
 # }
 _jobs: dict = {}
 _jobs_lock  = threading.Lock()
+
+# ── Demo mode ─────────────────────────────────────────────────────────────────
+# Set DEMO=1 in your environment to enable fallback values for out-of-range vitals.
+# Windows:  set DEMO=1 && uvicorn vitasense_server:app ...
+# Mac/Linux: DEMO=1 uvicorn vitasense_server:app ...
+DEMO_MODE = os.environ.get("DEMO", "").strip() in ("1", "true", "yes")
+if DEMO_MODE:
+    print("[server] *** DEMO MODE ENABLED — out-of-range vitals will be replaced with normal values ***")
 # ─────────────────────────────────────────────────────────────────────────────
 
 app = FastAPI(title="VitaSense Kiosk", version="2.1")
@@ -254,11 +267,28 @@ def _run_pipeline_job(job_id: str, webm_path: Path, mp4_path: Path):
             except Exception as e:
                 print(f"[job:{job_id[:8]}] BP error: {e}")
                 bp_data = {}
+
+            # Demo fallback: if BP was discarded or errored, inject normal-range values
+            if not bp_data and DEMO_MODE:
+                bp_data = {
+                    "sbp_mean": float(random.randint(110, 120)),
+                    "sbp_std":  float(random.randint(3, 6)),
+                    "dbp_mean": float(random.randint(70, 80)),
+                    "dbp_std":  float(random.randint(2, 5)),
+                }
+                print(f"[job:{job_id[:8]}] DEMO: injected BP fallback {bp_data}")
+                push_partial(bp_data)
         else:
             if not ippg_signal or len(ippg_signal) < 10:
                 print(f"[job:{job_id[:8]}] No signal for BP prediction.")
             if not bp_client.is_bp_server_alive():
                 print(f"[job:{job_id[:8]}] BP server not alive, skipping.")
+
+        # Demo fallback: clamp SpO2 — if ≤ 95%, replace with normal value
+        if DEMO_MODE and spo2_pct is not None and spo2_pct <= 95:
+            original_spo2 = spo2_pct
+            spo2_pct = float(random.randint(98, 100))
+            print(f"[job:{job_id[:8]}] DEMO: SpO2 {original_spo2:.1f}% → {spo2_pct:.0f}%")
 
         push("Done!")
         finish(result={
